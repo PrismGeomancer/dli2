@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <title>DALI: an octopus whose head is a melting clock. Two arms awake, six asleep.</title>
+  <g stroke="#6a6a6a" stroke-width="1.8">
+    <path d="M19 32C9 34 5 42 7 49C8 53 12 53 12 50"/>
+    <path d="M26 38C21 44 21 52 24 58C25 60 28 59 27.5 57"/>
+    <path d="M29 40C28 47 28 53 30 60"/>
+    <g transform="matrix(-1 0 0 1 64 0)">
+      <path d="M19 32C9 34 5 42 7 49C8 53 12 53 12 50"/>
+      <path d="M22 36C14 40 12 48 15 55C16.5 58 20 57 19.5 54"/>
+      <path d="M29 40C28 47 28 53 30 60"/>
+    </g>
+  </g>
+  <path d="M22 36C14 40 12 48 15 55C16.5 58 20 57 19.5 54" stroke="#8052ff" stroke-width="2.8"/>
+  <path d="M26 38C21 44 21 52 24 58C25 60 28 59 27.5 57" stroke="#ffb829" stroke-width="2.8" transform="matrix(-1 0 0 1 64 0)"/>
+  <path d="M17 25a15 15 0 1 1 30 0c0 6-5 11-11 12.4 0 5-1 8-4 8s-4-3-4-8C22 36 17 31 17 25z" stroke="#fff" stroke-width="2.4"/>
+  <path d="M32 25v-8M32 25l6 3" stroke="#fff" stroke-width="2.2"/>
+  <circle cx="32" cy="25" r="1.6" fill="#fff" stroke="none"/>
+</svg>

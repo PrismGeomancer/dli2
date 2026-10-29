@@ -1,0 +1,2162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DALI: Eight arms. One mind.</title>
+<meta name="description" content="An agent with six brains that reads a Solana token at the same time. Paste an address, get a plain-language verdict.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="DALI: Eight arms. One mind.">
+<meta property="og:description" content="An agent with six brains that reads a Solana token at the same time. Paste an address, get a plain-language verdict.">
+<link rel="icon" type="image/png" href="logo2.png">
+
+<!-- INTRO GATE: decides before first paint whether the intro plays (once per session, never with reduced motion). -->
+<script>
+(function () {
+  try {
+    var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var seen = sessionStorage.getItem('dali.intro') === '1';
+    if (!reduce && !seen) document.documentElement.classList.add('intro-on');
+  } catch (e) {}
+})();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;400;600;700&display=swap" rel="stylesheet">
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<!-- ============ CONFIG: edit this block ============ -->
+<script>
+window.DALI_CONFIG = {
+  x: "https://x.com/",                       // your X profile link
+  mint: "",                                  // token mint address; empty until launch (voting stays read-only)
+  tradeUrl: "",                              // trade link; when set, the DALI token card shows "Trade on Axiom"
+  rpc: "https://api.mainnet-beta.solana.com",// Solana RPC endpoint (use your own for production)
+  api: "",                                   // optional backend base URL that mirrors proposals and votes
+  quorum: 50,                                // votes needed for a proposal to count
+  minLiquidityUsd: 5000,                     // under this, a token is "Avoid"
+  maxTop10Pct: 70,                           // top 10 holders above this share, "Avoid"
+  minPairAgeHours: 24,                       // younger pairs raise a soft flag
+  lowVolumeUsd: 10000,                       // 24h volume under this raises a soft flag
+  bigMove1hPct: 30,                          // a 1h move larger than this raises a soft flag
+  features: { sound: true, intro: true, api: false }
+};
+</script>
+
+<style>
+/* ================= TOKENS (from DESIGN.md) ================= */
+:root{
+  --void:#000; --bone:#fff; --ash:#9a9a9a; --mist:#bdbdbd;
+  --iris:#8052ff; --saffron:#ffb829; --verdant:#15846e;
+  --teal:#2fd5b5; --blue:#4d8dff; --magenta:#ff4f8b; --lilac:#c9a6ff; --alert:#ff5470;
+  --line:rgba(154,154,154,.35);
+  --font:'Inter',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:24px; --u:6px; --max:1280px;
+  --z-scene:0; --z-home:5; --z-pages:10; --z-top:20; --z-zoom:30; --z-intro:50; --z-modal:60; --z-toast:70;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html{background:var(--void);color:var(--bone);-webkit-text-size-adjust:100%}
+body{font-family:var(--font);font-feature-settings:"ss01" on;font-weight:200;font-size:18px;line-height:1.5;background:var(--void);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+html.intro-on,html.intro-on body{overflow:hidden}
+html.intro-on #topbar,html.intro-on #home-ui,html.intro-on #pages{visibility:hidden}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--saffron);outline-offset:3px;border-radius:6px}
+::selection{background:var(--iris);color:#fff}
+h1,h2,h3{font-weight:400}
+b,strong{font-weight:600}
+
+/* ================= SHARED ================= */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--iris);color:#fff;font-weight:600;font-size:14px;letter-spacing:.025em;text-transform:uppercase;padding:14.4px 20px;border-radius:24px;transition:transform .15s,filter .15s}
+.btn:hover{filter:brightness(1.12)}
+.btn:active{transform:scale(.97)}
+.btn[disabled]{opacity:.35;cursor:not-allowed;filter:none;transform:none}
+.ghost{font-size:14px;font-weight:400;letter-spacing:.025em;text-transform:uppercase;color:var(--ash);padding:14px 6px;transition:color .15s;display:inline-block}
+.ghost:hover,.ghost.on{color:var(--bone)}
+.ghost.u{text-decoration:underline;text-underline-offset:5px}
+.label{font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--saffron)}
+.dim{color:var(--ash)} .mist{color:var(--mist)}
+.mono{font-family:var(--mono);font-size:.82em;font-weight:400;word-break:break-all}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 clamp(18px,4vw,48px)}
+
+/* ================= TOP BAR ================= */
+#topbar{position:fixed;inset:0 0 auto 0;z-index:var(--z-top);display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px max(clamp(18px,4vw,48px),calc((100vw - var(--max)) / 2 + 48px))}
+#topbar .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:18px;letter-spacing:.04em}
+#topbar .brand img{width:44px;height:58px;object-fit:contain;flex:none}
+#topbar nav{display:flex;gap:6px;align-items:center}
+#topbar nav a{font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--ash);padding:10px 12px;transition:color .15s}
+#topbar nav a{position:relative}
+#topbar nav a::after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:2px;border-radius:2px;background:var(--iris);transform:scaleX(0);transition:transform .25s}
+#topbar nav a:hover,#topbar nav a.on{color:var(--bone)}
+#topbar nav a.on::after{transform:scaleX(1)}
+#connect{font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--bone);padding:10px 6px;text-decoration:underline;text-underline-offset:6px;text-decoration-color:var(--iris);text-decoration-thickness:2px;white-space:nowrap}
+#connect .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--teal);margin-right:8px;vertical-align:1px}
+.top-right{display:flex;align-items:center;gap:12px}
+#menu-btn{display:none}
+#topbar nav .only-m{display:none;font-size:14px;color:var(--ash);text-align:left;padding:10px 0}
+#topbar{transition:background .3s}
+body:not(.on-home) #topbar{background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+
+/* ================= SCENE + HOME ================= */
+#scene{position:fixed;inset:0;width:100%;height:100%;z-index:var(--z-scene);display:block;touch-action:manipulation}
+#home-ui{position:fixed;inset:0;z-index:var(--z-home);pointer-events:none;display:flex;flex-direction:column;justify-content:center;padding:84px max(clamp(18px,4vw,48px),calc((100vw - var(--max)) / 2 + 48px)) 0}
+body:not(.on-home) #home-ui{display:none}
+#home-ui .hero{max-width:min(46vw,640px);pointer-events:none;margin-bottom:12vh}
+#home-ui .hero a,#home-ui .hero button{pointer-events:auto}
+.hero h1{font-size:clamp(46px,7.6vw,113px);line-height:1.02;letter-spacing:-.04em;margin-bottom:24px}
+.hero h1 span{display:block}
+.hero .lede{font-size:18px;font-weight:200;color:var(--bone);max-width:480px;margin-bottom:12px}
+.hero .small{font-size:14px;color:var(--ash);margin-bottom:30px}
+.hero .cta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.token-line{margin-top:30px;font-size:14px;color:var(--mist);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.token-line .copy{color:var(--saffron);font-weight:600;text-transform:uppercase;font-size:12px;letter-spacing:.025em;padding:6px 0}
+.token-line .btn{padding:10px 16px;font-size:12px}
+.hud{position:absolute;right:max(clamp(18px,4vw,48px),calc((100vw - var(--max)) / 2 + 48px));top:84px;text-align:right;pointer-events:none}
+.hud .count{font-size:clamp(40px,5vw,72px);font-weight:400;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.hud .count-l{font-size:14px;color:var(--ash);margin-bottom:6px}
+#sound{pointer-events:auto;margin-top:12px;font-size:12px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--ash);padding:8px 0}
+#sound[aria-pressed="true"]{color:var(--teal)}
+.hint{position:absolute;left:0;right:0;bottom:92px;text-align:center;font-size:13px;color:var(--ash);pointer-events:none;opacity:.8}
+body.nogl #scene,body.touch #scene{}
+body.touch .hint-pad,body.nogl .hint-pad{display:none}
+body.nogl #scene{display:none}
+.armrow{display:flex;align-items:center;gap:8px;margin-top:34px;font-size:14px;color:var(--ash);flex-wrap:wrap}
+.armrow svg{width:18px;height:18px;flex:none;stroke-width:1.6;stroke-linejoin:round}
+.armrow .dots{display:flex;gap:7px;margin-right:6px}
+.token-line{margin-top:18px!important}
+body.nogl #home-ui .hero{margin-bottom:6vh}
+
+/* ================= PAGES ================= */
+#pages{position:relative;z-index:var(--z-pages)}
+.page{position:fixed;inset:0;z-index:var(--z-pages);background:transparent;overflow-y:auto;overflow-x:hidden;padding-top:90px;-webkit-overflow-scrolling:touch}
+.page>.wrap{padding-bottom:30px}
+.page-title{font-size:clamp(44px,7vw,96px);line-height:1.02;letter-spacing:-.04em;margin:30px 0 18px}
+.page-sub{font-size:clamp(18px,2vw,24px);color:var(--mist);max-width:640px;margin-bottom:60px}
+.sec{margin-top:96px}
+.sec h2{font-size:clamp(30px,4vw,48px);letter-spacing:-.035em;line-height:1.1;margin-bottom:24px}
+.sec p{max-width:620px;color:var(--bone)}
+.sec p+p{margin-top:12px}
+
+/* footer */
+.foot{margin-top:120px;padding:36px 0 48px;color:var(--ash);font-size:13px;line-height:1.55}
+.foot .links{display:flex;gap:6px 22px;flex-wrap:wrap;margin-bottom:18px}
+.foot .links a,.foot .links button{font-size:13px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--mist);padding:6px 0}
+.foot .links a:hover,.foot .links button:hover{color:var(--bone)}
+.foot p{max-width:720px;font-weight:200}
+.foot p+p{margin-top:6px}
+#home-ui .foot{position:absolute;left:0;right:0;bottom:0;margin:0;padding:10px max(clamp(18px,4vw,48px),calc((100vw - var(--max)) / 2 + 48px)) 14px;pointer-events:none;font-size:11px;}
+#home-ui .foot .links{margin-bottom:6px;pointer-events:auto}
+#home-ui .foot a,#home-ui .foot button{pointer-events:auto;font-size:11px;padding:3px 0}
+
+/* ================= SCAN ================= */
+.steps{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:48px;font-size:18px;color:var(--ash)}
+.steps span{transition:color .3s}
+.steps span.on{color:var(--bone)} .steps span.done{color:var(--teal)}
+.steps i{font-style:normal;color:var(--ash)}
+.field{margin-bottom:30px;max-width:640px}
+.field label{display:block;font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--saffron);margin-bottom:6px}
+.field input{width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--bone);font:inherit;font-size:24px;font-weight:400;padding:10px 0;outline:0;letter-spacing:-.01em;border-radius:0}
+.field input:focus{border-bottom-color:var(--iris)}
+.field input::placeholder{color:#555}
+.field .hintt{font-size:14px;color:var(--ash);margin-top:6px}
+.field.small{max-width:240px}
+.err{color:var(--alert);font-size:16px;margin:0 0 24px;max-width:640px}
+.notice{color:var(--saffron);font-size:15px;margin:0 0 24px;max-width:640px}
+#scan-empty{margin-top:96px;font-size:clamp(24px,3vw,36px);letter-spacing:-.03em;color:var(--ash);max-width:680px;line-height:1.2}
+#scan-loading{margin-top:60px;font-size:24px;color:var(--mist)}
+#scan-loading::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--iris);margin-left:12px;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.2;transform:scale(.6)}}
+.verdict{margin-top:72px;scroll-margin-top:96px}
+.badge{display:inline-block;font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;padding:8px 16px;border-radius:9999px;color:#fff;margin-bottom:24px}
+.badge.clean{background:var(--verdant)} .badge.risky{background:var(--saffron);color:#000} .badge.avoid{background:var(--alert)}
+.verdict .sentence{font-size:clamp(26px,3.4vw,42px);line-height:1.18;letter-spacing:-.035em;font-weight:400;max-width:860px}
+.verdict .never{margin-top:24px;color:var(--mist);font-size:16px}
+.verdict .tools{margin-top:30px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.arms{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:60px clamp(30px,6vw,96px);margin-top:72px}
+.arm{--c:var(--ash);opacity:.38;transition:opacity .5s}
+.arm.lit{opacity:1}
+.arm.lit h3{color:var(--c)}
+.arm h3{display:flex;align-items:center;gap:12px;font-size:27px;letter-spacing:-.03em;line-height:1;margin-bottom:8px;transition:color .5s}
+.arm h3 svg{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+.arm.lit h3 svg{fill:var(--c);fill-opacity:.25}
+.arm .q{font-size:14px;color:var(--ash);margin-bottom:12px}
+.arm ul{list-style:none}
+.arm li{font-size:16px;margin-bottom:6px;color:var(--bone)}
+.arm li .k{display:inline-block;min-width:3.4em;font-size:12px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;margin-right:6px}
+.k.bad{color:var(--alert)} .k.warn{color:var(--saffron)} .k.ok{color:var(--teal)} .k.na{color:var(--ash)}
+.arm .note{font-size:13px;color:var(--ash);margin-top:10px}
+.arm .pending{font-size:15px;color:var(--ash)}
+.arm .tools{margin-top:14px}
+.decides{margin-top:96px}
+.decides ul{list-style:none;margin-top:18px;max-width:620px}
+.decides li{font-size:15px;color:var(--mist);margin-bottom:6px}
+.token-id{margin-top:18px;display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+.token-id h2{font-size:clamp(30px,4vw,48px);letter-spacing:-.035em}
+
+/* ================= VOTE / BOARD / HOW ================= */
+.tiles{display:flex;gap:clamp(30px,6vw,96px);flex-wrap:wrap;margin:30px 0 72px}
+.tile .n{font-size:clamp(44px,6vw,78px);letter-spacing:-.04em;line-height:1;font-weight:400;font-variant-numeric:tabular-nums}
+.tile .l{font-size:14px;color:var(--ash);margin-top:6px}
+.rules{font-size:18px;color:var(--mist);max-width:720px;margin-bottom:24px}
+.trust{margin-top:24px}
+.trust h2{font-size:27px;letter-spacing:-.03em;margin-bottom:12px}
+.trust li{list-style:none;color:var(--mist);margin-bottom:6px;font-size:16px}
+.props{margin-top:96px;display:flex;flex-direction:column;gap:84px}
+.prop h3{font-size:clamp(26px,3.2vw,42px);letter-spacing:-.035em;line-height:1.12;max-width:760px}
+.prop h3 a:hover{color:var(--saffron)}
+.prop .by{font-size:13px;color:var(--ash);margin:10px 0 14px}
+.prop .body{max-width:620px;color:var(--mist);font-size:17px}
+.bars{margin:24px 0 12px;max-width:620px;display:grid;gap:12px}
+.bar{display:grid;grid-template-columns:36px 1fr 120px;align-items:center;gap:12px;font-size:14px;color:var(--mist)}
+.bar .track{height:6px;border-radius:6px;background:#1a1a1a;overflow:hidden}
+.bar .fill{height:100%;border-radius:6px;width:0;transition:width .6s}
+.bar.yes .fill{background:var(--teal)} .bar.no .fill{background:var(--magenta)}
+.bar .v{text-align:right;font-variant-numeric:tabular-nums}
+.quorum{font-size:14px;color:var(--ash)}
+.vote-actions{margin-top:18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.vote-note{font-size:15px;color:var(--saffron)}
+.voters{margin-top:18px;font-size:13px;color:var(--ash);max-width:620px}
+.voters div{margin-bottom:2px}
+details.submit{margin-top:96px;max-width:640px}
+details.submit summary{cursor:pointer;list-style:none;font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--bone);text-decoration:underline;text-underline-offset:6px;text-decoration-color:var(--iris);text-decoration-thickness:2px;display:inline-block}
+details.submit summary::-webkit-details-marker{display:none}
+details.submit form{margin-top:30px}
+.field textarea{width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--bone);font:inherit;font-size:18px;padding:10px 0;outline:0;min-height:96px;resize:vertical;border-radius:0}
+.field textarea:focus{border-bottom-color:var(--iris)}
+.steps-list{list-style:none;counter-reset:s;margin-top:30px}
+.steps-list li{counter-increment:s;display:grid;grid-template-columns:72px 1fr;gap:6px 18px;margin-bottom:48px;max-width:760px}
+.steps-list li::before{content:counter(s);font-size:54px;line-height:1;letter-spacing:-.04em;color:var(--iris);font-weight:400}
+.steps-list h3{font-size:36px;letter-spacing:-.035em;line-height:1.1}
+.steps-list p{grid-column:2;color:var(--mist)}
+.plain-list{list-style:none;max-width:620px}
+.plain-list li{margin-bottom:12px}
+.risk{margin-top:96px;max-width:720px}
+.risk p{font-size:clamp(22px,2.6vw,30px);line-height:1.25;letter-spacing:-.03em;font-weight:400;color:var(--saffron)}
+.sides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:48px;margin-top:24px;max-width:960px}
+.sides h3{font-size:24px;letter-spacing:-.03em;margin-bottom:8px;color:var(--saffron)}
+.sides p{color:var(--mist)}
+.sides .wide{grid-column:1/-1;max-width:620px}
+.tabs{display:flex;gap:18px;margin:30px 0 48px;flex-wrap:wrap}
+.tabs button{font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--ash);padding:8px 0}
+.tabs button[aria-selected="true"]{color:var(--bone);text-decoration:underline;text-decoration-color:var(--iris);text-decoration-thickness:2px;text-underline-offset:8px}
+.hist{display:flex;flex-direction:column;gap:60px}
+.hist .prop h3{font-size:30px}
+.hist .meta{font-size:14px;color:var(--ash);margin-top:8px;display:flex;gap:18px;flex-wrap:wrap}
+.empty{font-size:clamp(24px,3vw,36px);letter-spacing:-.03em;line-height:1.2;color:var(--ash);max-width:560px}
+.prop-page .tools{display:flex;gap:12px;flex-wrap:wrap;margin:24px 0 30px;align-items:center}
+.back{font-size:14px;color:var(--ash)}
+
+/* ================= MODAL / TOAST / ZOOM ================= */
+#modal{position:fixed;inset:0;z-index:var(--z-modal);background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:18px}
+#modal .panel{background:#000;outline:1px solid #262626;border-radius:var(--r);padding:36px;width:min(460px,100%);max-height:90vh;overflow:auto}
+#modal h2{font-size:36px;letter-spacing:-.035em;margin-bottom:8px}
+#modal .note{font-size:15px;color:var(--mist);margin-bottom:24px}
+#modal .w{display:flex;align-items:center;justify-content:space-between;width:100%;padding:16px 0;font-size:24px;letter-spacing:-.02em;font-weight:400;text-align:left;color:var(--bone)}
+#modal .w small{font-size:12px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--ash)}
+#modal .w.det small{color:var(--teal)}
+#modal .w:hover{color:var(--saffron)}
+#modal .close{margin-top:18px;font-size:13px;color:var(--ash);text-transform:uppercase;letter-spacing:.025em;font-weight:600}
+#toast{position:fixed;left:50%;bottom:30px;transform:translate(-50%,24px);opacity:0;z-index:var(--z-toast);background:#fff;color:#000;font-weight:400;font-size:15px;padding:12px 22px;border-radius:9999px;transition:.3s;pointer-events:none;max-width:calc(100vw - 36px);text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#zoomfade{position:fixed;inset:0;z-index:var(--z-zoom);pointer-events:none;opacity:0;background:#000}
+
+/* ================= INTRO (removable block: css) ================= */
+#intro{position:fixed;inset:0;z-index:var(--z-intro);background:#000;overflow:hidden;cursor:pointer;transition:opacity .6s ease}
+#intro canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#intro .hudc{position:absolute;left:clamp(18px,4vw,48px);bottom:clamp(22px,5vh,48px);font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ash);min-height:1.4em;transition:color .2s;font-variant-numeric:tabular-nums}
+#intro .headc{position:absolute;left:0;right:0;bottom:16vh;text-align:center;font-size:clamp(34px,6vw,72px);letter-spacing:-.04em;font-weight:400;opacity:0;pointer-events:none}
+#intro .skip{position:absolute;right:clamp(18px,4vw,48px);top:clamp(16px,3vh,32px);font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ash);padding:10px 0}
+#intro .skip:hover{color:var(--bone)}
+#intro .logoc{object-fit:contain;position:absolute;left:clamp(18px,4vw,48px);top:clamp(16px,3vh,32px);width:56px;height:74px;opacity:1}
+#intro.out{opacity:0;pointer-events:none}
+/* ================= /INTRO ================= */
+
+/* hero entrance (runs once, after the intro hand-off) */
+.pre-enter .hero>*,.pre-enter .hud{opacity:0;transform:translateY(14px)}
+.hero>*,.hud{transition:opacity .8s ease,transform .8s ease}
+.hero>*:nth-child(2){transition-delay:.12s}.hero>*:nth-child(3){transition-delay:.2s}.hero>*:nth-child(4){transition-delay:.28s}.hero>*:nth-child(5){transition-delay:.36s}
+
+/* ================= PAGE INTERACTIONS ================= */
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.chips button{font-size:13px;font-weight:600;letter-spacing:.025em;color:var(--mist);background:#121212;padding:8px 14px;border-radius:9999px;transition:background .2s,color .2s,transform .15s}
+.chips button:hover{background:#1c1c1c;color:var(--bone)}
+.chips button:active{transform:scale(.95)}
+.chips button[aria-pressed="true"],.chips button.on{background:var(--bone);color:#000}
+.chips a{font-size:13px;font-weight:600;color:var(--mist);background:#121212;padding:8px 14px;border-radius:9999px;display:inline-flex;gap:8px;align-items:center;transition:background .2s,color .2s}
+.chips a:hover{background:#1c1c1c;color:var(--bone)}
+.chips a i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.cap{font-size:13px;color:var(--ash);margin:48px 0 0}
+.inrow{display:flex;align-items:center;gap:12px}
+.inrow input{flex:1}
+.count{font-size:12px;color:var(--ash);text-align:right;margin-top:4px;font-variant-numeric:tabular-nums}
+
+/* reveal on scroll (restrained: used on proposals, steps and cards only) */
+.rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
+.rv.in{opacity:1;transform:none}
+.page.enter .page-title{animation:titlein .8s cubic-bezier(.2,.7,.2,1) both}
+.page.enter .page-sub,.page.enter .rules{animation:titlein .8s .1s cubic-bezier(.2,.7,.2,1) both}
+@keyframes titlein{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+
+/* vote: wallet gate */
+.gate{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;max-width:860px;margin:0 0 24px}
+.gstep{display:flex;gap:14px;align-items:flex-start;opacity:.45;transition:opacity .4s}
+.gstep svg{width:26px;height:26px;flex:none;fill:none;stroke:var(--ash);stroke-width:1.5;stroke-linejoin:round;transition:all .4s;margin-top:2px}
+.gstep b{display:block;font-weight:400;font-size:20px;letter-spacing:-.02em}
+.gstep span{font-size:14px;color:var(--ash)}
+.gstep.active{opacity:1}
+.gstep.active svg{stroke:var(--saffron);animation:pulse 1.6s infinite}
+.gstep.done{opacity:1}
+.gstep.done svg{fill:var(--teal);fill-opacity:.35;stroke:var(--teal)}
+.trust{margin:72px 0 0}
+.trust ul{display:flex;gap:12px 36px;flex-wrap:wrap}
+.trust li{max-width:300px}
+.toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-top:96px}
+.toolbar h2{font-size:clamp(30px,4vw,48px);letter-spacing:-.035em;line-height:1.1}
+.props{margin-top:36px;gap:0}
+.prop{padding:48px 0;border-top:1px solid #1d1d1d;transition:background .4s}
+.prop:first-child{border-top:0}
+.prop .head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.pill{font-size:12px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;padding:5px 12px;border-radius:9999px;background:#161616;color:var(--mist)}
+.pill.open{background:rgba(47,213,181,.14);color:var(--teal)}
+.pill.passed{background:var(--verdant);color:#fff}
+.pill.rejected{background:rgba(255,84,112,.16);color:var(--alert)}
+.pill.soon{background:rgba(255,184,41,.14);color:var(--saffron)}
+.prop .head .by{margin:0}
+.prop h3 a{background:linear-gradient(var(--saffron),var(--saffron)) 0 100%/0 2px no-repeat;transition:background-size .3s}
+.prop h3 a:hover{background-size:100% 2px;color:var(--bone)}
+.prop.flash{animation:flash 1.6s ease}
+@keyframes flash{0%{background:rgba(128,82,255,.18)}100%{background:transparent}}
+.bar .fill{width:0;transition:width 1s cubic-bezier(.2,.7,.2,1)}
+.prop.in .bar .fill,.prop-page .bar .fill{width:var(--w)}
+.qmeter{max-width:620px;margin-top:6px}
+.qmeter .track{height:3px;background:#1a1a1a;border-radius:3px;overflow:hidden;margin-top:8px}
+.qmeter .track i{display:block;height:100%;width:0;background:var(--saffron);transition:width 1s .2s}
+.prop.in .qmeter i,.prop-page .qmeter i{width:var(--w)}
+.btn.busy{opacity:.7;pointer-events:none}
+.btn.busy::before{content:"";width:10px;height:10px;border-radius:50%;border:2px solid #fff;border-right-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.prop .tools{display:flex;gap:6px 18px;flex-wrap:wrap;margin-top:18px}
+.prop .tools a,.prop .tools button{font-size:13px;color:var(--ash);padding:4px 0;transition:color .2s}
+.prop .tools a:hover,.prop .tools button:hover{color:var(--bone)}
+.submit{max-width:1000px}
+.submit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.9fr);gap:60px;margin-top:36px;align-items:start}
+.preview h3{font-size:30px;letter-spacing:-.03em;line-height:1.15;margin-top:12px}
+.preview .body{color:var(--mist);margin-top:10px;font-size:16px}
+.preview{opacity:.8}
+.preview .cap{margin:0}
+.field textarea{font-weight:200}
+
+/* how */
+.how-grid{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:clamp(36px,6vw,96px)}
+.how-rail{position:sticky;top:110px;align-self:start}
+.how-rail .page-title{font-size:clamp(40px,4.4vw,64px);margin-top:12px}
+.rail{list-style:none;margin-top:36px}
+.rail button{display:flex;align-items:center;gap:12px;font-size:16px;color:var(--ash);padding:8px 0;transition:color .2s,transform .2s}
+.rail button::before{content:"";width:14px;height:1.5px;background:currentColor;transition:width .3s}
+.rail button:hover{color:var(--bone)}
+.rail button.on{color:var(--bone)}
+.rail button.on::before{width:34px;background:var(--iris)}
+.hstep{display:grid;grid-template-columns:72px 1fr;gap:6px 18px;margin-bottom:96px}
+.hstep .num{font-size:72px;line-height:.9;letter-spacing:-.05em;color:var(--iris);font-weight:400}
+.hstep h2{font-size:clamp(34px,4vw,54px);letter-spacing:-.04em;line-height:1.05}
+.hstep p{color:var(--mist);margin-top:8px;max-width:520px}
+.viz{margin-top:30px;min-height:56px;display:flex;align-items:center;gap:14px}
+.v-paste{border-bottom:1px solid var(--line);max-width:420px;padding:10px 0;color:var(--ash);font-size:22px;font-weight:400;justify-content:space-between}
+.caret{width:2px;height:28px;background:var(--iris);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.v-read svg,.v-vote svg{width:34px;height:34px;fill:none;stroke:#444;stroke-width:1.4;stroke-linejoin:round}
+.hstep.in .v-read svg{animation:armlit 3.2s var(--d) infinite}
+@keyframes armlit{0%,6%{fill:transparent;stroke:#444;filter:none}12%,40%{fill:var(--c);fill-opacity:.35;stroke:var(--c);filter:drop-shadow(0 0 8px var(--c))}60%,100%{fill:transparent;stroke:#444;filter:none}}
+.v-verdict{flex-wrap:wrap}
+.v-verdict .badge{margin:0}
+.v-vote svg.on{fill:var(--bone);fill-opacity:.12;stroke:var(--mist)}
+.v-vote svg.wake{stroke:var(--iris)}
+.hstep.in .v-vote svg.wake{animation:wake 2.4s infinite}
+@keyframes wake{0%,100%{fill:transparent;stroke:#444}50%{fill:var(--iris);fill-opacity:.5;stroke:var(--iris);filter:drop-shadow(0 0 10px var(--iris))}}
+.hsec{margin-bottom:120px}
+.hsec h2{font-size:clamp(34px,4vw,54px);letter-spacing:-.04em;line-height:1.05;margin-bottom:12px}
+.acc{margin-top:30px}
+.acc-item{border-top:1px solid #1d1d1d}
+.acc-item:last-child{border-bottom:1px solid #1d1d1d}
+.acc-item>button{display:flex;align-items:center;gap:16px;width:100%;text-align:left;padding:22px 0;font-size:28px;letter-spacing:-.03em;font-weight:400;color:var(--bone);transition:color .25s}
+.acc-item svg{width:22px;height:22px;flex:none;fill:none;stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;transition:fill .3s}
+.acc-item>button small{font-size:14px;color:var(--ash);font-weight:200;letter-spacing:0;margin-left:auto;text-align:right}
+.acc-item:hover>button,.acc-item.open>button{color:var(--c)}
+.acc-item.open svg{fill:var(--c);fill-opacity:.3}
+.acc-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s ease}
+.acc-item.open .acc-body{grid-template-rows:1fr}
+.acc-body>div{overflow:hidden}
+.acc-body p{padding:0 0 24px 38px;color:var(--mist);max-width:560px}
+.acc-body em{display:block;font-style:normal;font-size:13px;color:var(--ash);margin-top:8px}
+.acc-item.asleep svg{stroke:#555}
+.acc-item.asleep>button{color:var(--ash)}
+.sim{margin-top:30px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:start}
+.sim-ctl{display:grid;gap:22px}
+.rng label{display:flex;justify-content:space-between;font-size:14px;color:var(--mist);margin-bottom:6px}
+.rng label b{font-weight:600;color:var(--bone);font-variant-numeric:tabular-nums}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:4px;background:#222;outline:0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--bone);border:0;cursor:grab;transition:transform .15s,box-shadow .15s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15);box-shadow:0 0 0 6px rgba(128,82,255,.3)}
+input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--bone);border:0}
+.tg{display:flex;align-items:center;justify-content:space-between;font-size:15px;color:var(--mist);padding:4px 0;width:100%;text-align:left}
+.tg i{width:40px;height:22px;border-radius:22px;background:#222;position:relative;transition:background .25s;flex:none}
+.tg i::after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:var(--bone);transition:transform .25s}
+.tg[aria-checked="true"] i{background:var(--iris)}
+.tg[aria-checked="true"] i::after{transform:translateX(18px)}
+.sim-out{position:sticky;top:110px}
+.sim-out .sentence{font-size:clamp(22px,2.4vw,30px);line-height:1.2;letter-spacing:-.03em;font-weight:400;margin-top:6px}
+.sim-out .badge{transition:background .3s,color .3s}
+.sim-out .never{margin-top:18px;color:var(--ash);font-size:14px}
+.sim-out .chips{margin-top:20px}
+.risk{margin-top:48px}
+.sidetabs{margin:24px 0 24px}
+.side{font-size:clamp(24px,3vw,38px);letter-spacing:-.035em;line-height:1.2;font-weight:400;max-width:620px;min-height:5em;animation:titlein .5s both}
+.side small{display:block;font-size:16px;letter-spacing:0;color:var(--mist);font-weight:200;margin-top:14px}
+
+/* tabs: shared */
+.tabs button{position:relative}
+.tabs button em{font-style:normal;font-size:12px;color:var(--ash);margin-left:6px;font-variant-numeric:tabular-nums}
+.tabs button::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--iris);transform:scaleX(0);transform-origin:left;transition:transform .3s}
+.tabs button[aria-selected="true"]{text-decoration:none}
+.tabs button[aria-selected="true"]::after{transform:scaleX(1)}
+
+/* board */
+.hist{gap:0}
+.hist .prop{display:grid;grid-template-columns:140px 1fr;gap:6px 24px;padding:32px 0}
+.hist .when{font-size:14px;color:var(--ash);padding-top:10px}
+.hist .meta{margin-top:12px}
+.empty-wrap{display:flex;gap:36px;align-items:center;flex-wrap:wrap}
+.empty-wrap img{width:120px;height:160px;object-fit:contain;flex:none;opacity:.9}
+.empty-wrap .empty{margin-bottom:12px}
+.asleep{margin-top:120px}
+.asleep p{color:var(--mist)}
+
+/* proposal page */
+.prop-page .prop .head,.prop-page .prop h3,.prop-page .prop .body,.prop-page .prop .tools{display:none}
+.prop-page .prop{padding-top:0;border:0}
+.prop-page .back{display:inline-block;margin-top:24px;font-size:14px;color:var(--ash);transition:color .2s}
+.prop-page .back:hover{color:var(--bone)}
+.p-hero{margin:24px 0 12px}
+.p-hero .page-title{margin:14px 0 12px}
+.p-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:72px;margin-top:36px}
+.p-big{display:flex;gap:48px;margin:30px 0}
+.p-big .n{font-size:clamp(54px,7vw,96px);letter-spacing:-.05em;line-height:1;font-weight:400;font-variant-numeric:tabular-nums}
+.p-big .n.y{color:var(--teal)} .p-big .n.no{color:var(--magenta)}
+.p-big .l{font-size:14px;color:var(--ash)}
+.p-side .cap{margin:0 0 12px}
+.p-adj{display:flex;flex-direction:column;gap:6px;margin-top:48px}
+.p-adj a{font-size:20px;letter-spacing:-.02em;color:var(--mist);transition:color .2s}
+.p-adj a:hover{color:var(--saffron)}
+.voters{max-width:none}
+.voters div{padding:8px 0;border-top:1px solid #1a1a1a;display:flex;justify-content:space-between;gap:12px}
+
+@media (max-width:900px){
+  .gate{grid-template-columns:1fr;gap:16px}
+  .how-grid{grid-template-columns:minmax(0,1fr)}
+  .how-rail{position:static}
+  .rail{display:none}
+  .sim,.submit-grid,.p-grid{grid-template-columns:minmax(0,1fr);gap:36px}
+  .how-main{min-width:0}
+  #disconnect{display:none}
+  #topbar nav .only-m{display:block}
+  .sim-out{position:static}
+  .hist .prop{grid-template-columns:1fr}
+  .hstep{grid-template-columns:48px 1fr}
+  .hstep .num{font-size:48px}
+  .acc-item>button{font-size:22px}
+  .acc-item>button small{display:none}
+}
+
+/* ================= RESPONSIVE ================= */
+@media (max-width:900px){
+  #topbar nav{display:none}
+  #menu-btn{display:inline-block;font-size:14px;font-weight:600;letter-spacing:.025em;text-transform:uppercase;color:var(--ash);padding:10px 6px}
+  #topbar.open nav{display:flex;position:fixed;inset:64px 0 auto 0;background:#000;flex-direction:column;align-items:flex-start;padding:12px clamp(18px,4vw,48px) 24px}
+  #topbar.open nav a{font-size:24px;padding:12px 0;letter-spacing:-.02em;text-transform:none;color:var(--bone)}
+  .arms{grid-template-columns:1fr;gap:48px}
+  .sides{grid-template-columns:1fr}
+  #home-ui{justify-content:flex-end;padding-top:0}
+  #home-ui .hero{max-width:560px;margin-bottom:0}
+  #home-ui .foot{position:static;padding:14px 0 12px;background:none}
+  #home-ui .foot .links{gap:2px 16px}
+  .hero h1{font-size:clamp(40px,11vw,64px);margin-bottom:14px}
+  .hero .lede{font-size:16px}
+  .hero .small{margin-bottom:18px;font-size:13px}
+  .token-line{margin-top:16px}
+  .hud{top:72px}
+  .hint{display:none}
+  .armrow{margin-top:20px;font-size:13px}
+  .steps-list li{grid-template-columns:48px 1fr}
+  .steps-list li::before{font-size:36px}
+  .steps-list h3{font-size:28px}
+}
+@media (max-width:520px){
+  body{font-size:17px}
+  .hero .lede{margin-bottom:8px}
+  .hud .count{font-size:34px}
+  .bar{grid-template-columns:30px 1fr 88px}
+  #modal .panel{padding:24px}
+}
+@media (max-height:620px) and (max-width:900px){ .hero .small{display:none} .hint{display:none} }
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body class="on-home pre-enter">
+
+<!-- brand mark: octopus whose head is a melting clock; two arms awake, six asleep -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 64 64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#6a6a6a" stroke-width="1.8">
+      <path d="M19 32C9 34 5 42 7 49C8 53 12 53 12 50"/>
+      <path d="M26 38C21 44 21 52 24 58C25 60 28 59 27.5 57"/>
+      <path d="M29 40C28 47 28 53 30 60"/>
+      <g transform="matrix(-1 0 0 1 64 0)">
+        <path d="M19 32C9 34 5 42 7 49C8 53 12 53 12 50"/>
+        <path d="M22 36C14 40 12 48 15 55C16.5 58 20 57 19.5 54"/>
+        <path d="M29 40C28 47 28 53 30 60"/>
+      </g>
+    </g>
+    <path d="M22 36C14 40 12 48 15 55C16.5 58 20 57 19.5 54" stroke="#8052ff" stroke-width="2.8"/>
+    <path d="M26 38C21 44 21 52 24 58C25 60 28 59 27.5 57" stroke="#ffb829" stroke-width="2.8" transform="matrix(-1 0 0 1 64 0)"/>
+    <path d="M17 25a15 15 0 1 1 30 0c0 6-5 11-11 12.4 0 5-1 8-4 8s-4-3-4-8C22 36 17 31 17 25z" stroke="#fff" stroke-width="2.4"/>
+    <path d="M32 25v-8M32 25l6 3" stroke="#fff" stroke-width="2.2"/>
+    <circle cx="32" cy="25" r="1.6" fill="#fff" stroke="none"/>
+  </symbol>
+  <symbol id="tri" viewBox="0 0 20 20"><path d="M10 2.5 18 16.5H2z"/></symbol>
+</svg>
+
+<canvas id="scene" aria-label="DALI, a glass octopus floating in dark water. Click to drop a coin or boop the octopus."></canvas>
+
+<header id="topbar">
+  <a class="brand" href="#/" aria-label="DALI home"><img src="logo2-crop.png" alt="" width="44" height="58"><span>DALI</span></a>
+  <nav aria-label="Main">
+    <a href="#/scan" data-nav="scan">Scan</a>
+    <a href="#/vote" data-nav="vote">Vote</a>
+    <a href="#/how" data-nav="how">How it works</a>
+    <a href="#/board" data-nav="board">Board</a>
+    <a href="#" data-x>X</a>
+    <button type="button" class="only-m" id="disconnect-m" hidden>Disconnect wallet</button>
+  </nav>
+  <div class="top-right">
+    <button id="connect" type="button">Connect wallet</button>
+    <button id="disconnect" class="ghost" type="button" hidden>Disconnect</button>
+    <button id="menu-btn" type="button" aria-label="Menu" aria-expanded="false">Menu</button>
+  </div>
+</header>
+
+<!-- ============ HOME ============ -->
+<div id="home-ui">
+  <div class="hero">
+    <h1><span>Eight arms.</span> <span>One mind.</span></h1>
+    <p class="lede">DALI is an agent with six brains that read a Solana token at the same time. Paste an address and get a plain-language verdict before you buy.</p>
+    <p class="small">Reads public market and on-chain data. Not financial advice.</p>
+    <div class="cta">
+      <a class="btn" href="#/scan">Scan a token</a>
+      <a class="ghost" href="#/how">How it works</a>
+    </div>
+    <div class="armrow" aria-label="Six arms awake, two asleep"><span class="dots"><svg viewBox="0 0 20 20" style="fill:#2fd5b5;fill-opacity:.35;stroke:#2fd5b5"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:#4d8dff;fill-opacity:.35;stroke:#4d8dff"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:#ffb829;fill-opacity:.35;stroke:#ffb829"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:#ff4f8b;fill-opacity:.35;stroke:#ff4f8b"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:#8052ff;fill-opacity:.35;stroke:#8052ff"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:#c9a6ff;fill-opacity:.35;stroke:#c9a6ff"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:none;stroke:#555"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="fill:none;stroke:#555"><use href="#tri"/></svg></span><span>Six arms awake. Two asleep. Holders vote on the next.</span></div>
+    <div class="token-line" data-token-card></div>
+  </div>
+  <div class="hud">
+    <div class="count-l">Tokens read</div>
+    <div class="count" id="counter">0</div>
+    <button id="sound" type="button" aria-pressed="false">Sound off</button>
+  </div>
+  <p class="hint hint-pad">Click the water. Boop the octopus.</p>
+  <footer class="foot" data-foot></footer>
+</div>
+
+<!-- ============ PAGES ============ -->
+<main id="pages">
+
+  <section class="page" id="page-scan" hidden><div class="wrap">
+    <h1 class="page-title">Scan a token</h1>
+    <p class="page-sub">Six brains read it at once. You get one clear answer.</p>
+    <div class="steps" id="steps"><span data-s="1" class="on">1 Paste</span><i>→</i><span data-s="2">2 Read</span><i>→</i><span data-s="3">3 Verdict</span></div>
+    <form id="scan-form" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="addr">Token address</label>
+        <div class="inrow">
+          <input id="addr" name="addr" type="text" inputmode="text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Paste token address">
+          <button type="button" class="ghost u" id="paste-btn">Paste</button>
+        </div>
+        <div class="hintt">Paste a Solana token address (the long string of letters and numbers).</div>
+      </div>
+      <div class="field small">
+        <label for="size">Your entry size (SOL)</label>
+        <input id="size" name="size" type="number" inputmode="decimal" min="0.01" step="any" value="1">
+        <div class="chips" id="size-chips"><button type="button" data-size="0.5">0.5</button><button type="button" data-size="1">1</button><button type="button" data-size="2">2</button><button type="button" data-size="5">5</button><button type="button" data-size="10">10</button></div>
+      </div>
+      <p class="err" id="scan-err" role="alert" hidden></p>
+      <button class="btn" id="read-btn" type="submit">Read it</button>
+    </form>
+    <div id="recent" hidden>
+      <p class="cap">Your recent reads</p>
+      <div class="chips" id="recent-list"></div>
+    </div>
+
+    <p id="scan-empty">Paste a token address and DALI will read it.</p>
+    <p id="scan-loading" hidden>The arms are reading…</p>
+
+    <div id="scan-result" hidden>
+      <p class="notice" id="scan-partial" hidden>Some arms couldn't read this token. The result below covers what DALI could check.</p>
+      <div class="verdict" id="verdict" hidden></div>
+      <div class="arms" id="arms"></div>
+    </div>
+
+    <div class="decides sec">
+      <h2>How DALI decides</h2>
+      <p>"Avoid" if the token can still be minted or frozen, if liquidity is very low, or if a few wallets hold most of the supply. "Risky" if there are two or more softer flags. Otherwise "Clean read". The rules are simple on purpose, and you can see every check above.</p>
+      <ul id="thresholds"></ul>
+    </div>
+    <footer class="foot" data-foot></footer>
+  </div></section>
+
+  <section class="page" id="page-vote" hidden><div class="wrap">
+    <h1 class="page-title">Wake the next arm</h1>
+    <p class="rules page-sub">One wallet, one vote per proposal. Your weight is your DALI balance. Votes are signed messages, never transactions.</p>
+    <div class="token-line" data-token-card></div>
+    <div class="tiles">
+      <div class="tile"><div class="n" id="t-open">0</div><div class="l">Open proposals</div></div>
+      <div class="tile"><div class="n" id="t-votes">0</div><div class="l">Votes cast</div></div>
+      <div class="tile"><div class="n" id="t-weight">–</div><div class="l">Your voting weight</div></div>
+    </div>
+
+    <div class="gate" id="gate" aria-live="polite">
+      <div class="gstep" data-g="1"><svg viewBox="0 0 20 20"><use href="#tri"/></svg><div><b>Connect</b><span>Link your wallet</span></div></div>
+      <div class="gstep" data-g="2"><svg viewBox="0 0 20 20"><use href="#tri"/></svg><div><b>Hold DALI</b><span>Weight is your balance</span></div></div>
+      <div class="gstep" data-g="3"><svg viewBox="0 0 20 20"><use href="#tri"/></svg><div><b>Sign</b><span>A message, never a transaction</span></div></div>
+    </div>
+    <p class="notice" id="vote-notice" hidden></p>
+
+    <div class="trust">
+      <h2>Why you can trust a vote here</h2>
+      <ul><li>Your vote is a signed message. DALI can't move your funds.</li><li>Weight is read live from the Solana chain.</li><li>Every vote is tied to a wallet and shown on the proposal.</li></ul>
+    </div>
+
+    <div class="toolbar">
+      <h2>Open proposals</h2>
+      <div class="chips" id="sort-chips" role="group" aria-label="Sort proposals"><button type="button" data-sort="newest" aria-pressed="true">Newest</button><button type="button" data-sort="votes" aria-pressed="false">Most votes</button></div>
+    </div>
+    <div class="props" id="props"></div>
+
+    <section class="sec submit" id="submit-box">
+      <h2>Submit proposal</h2>
+      <p class="dim">Propose which arm should wake next, or what it should do. You sign it with your wallet. Nothing is sent on-chain.</p>
+      <div class="submit-grid">
+        <form id="prop-form" autocomplete="off">
+          <div class="field"><label for="p-title">Title</label><input id="p-title" maxlength="90" required><div class="count" id="c-title">0 / 90</div></div>
+          <div class="field"><label for="p-body">What should the arm do?</label><textarea id="p-body" maxlength="400" required></textarea><div class="count" id="c-body">0 / 400</div></div>
+          <p class="vote-note" id="p-note" hidden></p>
+          <button class="btn" type="submit" id="p-submit">Submit proposal</button>
+        </form>
+        <div class="preview" aria-hidden="true"><p class="cap">How it will look</p><h3 id="pv-title">Your title</h3><p class="body" id="pv-body">Your description appears here.</p></div>
+      </div>
+    </section>
+    <footer class="foot" data-foot></footer>
+  </div></section>
+
+  <section class="page" id="page-how" hidden><div class="wrap">
+    <div class="how-grid">
+      <aside class="how-rail">
+        <h1 class="page-title">How DALI works</h1>
+        <ol class="rail" id="how-rail">
+          <li><button type="button" data-step="1">Paste</button></li>
+          <li><button type="button" data-step="2">Read</button></li>
+          <li><button type="button" data-step="3">Verdict</button></li>
+          <li><button type="button" data-step="4">Vote</button></li>
+          <li><button type="button" data-step="5">The six arms</button></li>
+          <li><button type="button" data-step="6">The rules</button></li>
+          <li><button type="button" data-step="7">Protections</button></li>
+        </ol>
+      </aside>
+      <div class="how-main">
+        <section class="hstep rv" id="how-1" data-step="1"><span class="num">1</span><div><h2>Paste</h2><p>Drop in any Solana token address.</p>
+          <div class="viz v-paste"><span>Token address</span><i class="caret"></i></div></div></section>
+        <section class="hstep rv" id="how-2" data-step="2"><span class="num">2</span><div><h2>Read</h2><p>Six arms check the market and the chain at the same time.</p>
+          <div class="viz v-read">
+            <svg viewBox="0 0 20 20" style="--c:#2fd5b5;--d:0s"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="--c:#4d8dff;--d:.25s"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="--c:#ffb829;--d:.5s"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="--c:#ff4f8b;--d:.75s"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="--c:#8052ff;--d:1s"><use href="#tri"/></svg><svg viewBox="0 0 20 20" style="--c:#c9a6ff;--d:1.25s"><use href="#tri"/></svg>
+          </div></div></section>
+        <section class="hstep rv" id="how-3" data-step="3"><span class="num">3</span><div><h2>Verdict</h2><p>One clear answer: Clean read, Risky or Avoid, with the reason.</p>
+          <div class="viz v-verdict"><span class="badge clean">Clean read</span><span class="badge risky">Risky</span><span class="badge avoid">Avoid</span></div></div></section>
+        <section class="hstep rv" id="how-4" data-step="4"><span class="num">4</span><div><h2>Vote</h2><p>Holders decide which sleeping arm wakes up next.</p>
+          <div class="viz v-vote"><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="on"><use href="#tri"/></svg><svg viewBox="0 0 20 20" class="wake"><use href="#tri"/></svg><svg viewBox="0 0 20 20"><use href="#tri"/></svg></div>
+          <a class="ghost u" href="#/vote" style="padding-left:0">See open proposals</a></div></section>
+
+        <section class="hsec rv" id="how-5" data-step="5"><h2>The six arms</h2><p class="dim">Tap an arm to see what it checks.</p><div class="acc" id="arm-acc"></div></section>
+
+        <section class="hsec rv" id="how-6" data-step="6"><h2>Play with the rules</h2><p class="dim">This runs the same rules DALI applies to a real token. Move the controls and watch the verdict change. The numbers are yours; they are not a real token.</p><div class="sim" id="sim"></div></section>
+
+        <section class="hsec rv" id="how-7" data-step="7">
+          <h2>Key protections</h2>
+          <ul class="plain-list">
+            <li>DALI never asks for your seed phrase.</li>
+            <li>DALI never sends a transaction. It only asks for a signed message.</li>
+            <li>Everything DALI reads is public data you could check yourself.</li>
+          </ul>
+          <div class="risk"><p>DALI is a second opinion, not a guarantee. It can miss things, data can be late, and meme coins can go to zero overnight. Never put in more than you can lose.</p></div>
+          <h2 style="margin-top:96px">Why would each side say yes</h2>
+          <div class="tabs sidetabs" role="tablist" id="side-tabs">
+            <button role="tab" data-side="0" aria-selected="true">Traders</button>
+            <button role="tab" data-side="1" aria-selected="false">Holders</button>
+            <button role="tab" data-side="2" aria-selected="false">Works alongside your terminal</button>
+          </div>
+          <blockquote class="side" id="side-body"></blockquote>
+        </section>
+      </div>
+    </div>
+    <footer class="foot" data-foot></footer>
+  </div></section>
+
+  <section class="page" id="page-board" hidden><div class="wrap">
+    <h1 class="page-title">The Board</h1>
+    <div class="tiles">
+      <div class="tile"><div class="n" id="b-pass">0</div><div class="l">Proposals passed</div></div>
+      <div class="tile"><div class="n" id="b-rej">0</div><div class="l">Proposals rejected</div></div>
+      <div class="tile"><div class="n" id="b-deb">0</div><div class="l">Debates held</div></div>
+    </div>
+    <div class="tabs" role="tablist" id="board-tabs">
+      <button role="tab" data-tab="completed" aria-selected="true">Completed <em id="tc-c">0</em></button>
+      <button role="tab" data-tab="rejected" aria-selected="false">Rejected <em id="tc-r">0</em></button>
+      <button role="tab" data-tab="debates" aria-selected="false">Debates <em id="tc-d">0</em></button>
+    </div>
+    <div id="board-list"></div>
+    <section class="sec asleep">
+      <h2>Two arms are still asleep</h2>
+      <p>Holders decide which one wakes next. Every open proposal is a candidate.</p>
+      <a class="btn" href="#/vote" style="margin-top:24px">See open proposals</a>
+    </section>
+    <footer class="foot" data-foot></footer>
+  </div></section>
+
+  <section class="page prop-page" id="page-p" hidden><div class="wrap">
+    <a class="back" href="#/vote">Back to proposals</a>
+    <div id="p-view"></div>
+    <footer class="foot" data-foot></footer>
+  </div></section>
+
+</main>
+
+<div id="zoomfade"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-t">
+  <div class="panel">
+    <h2 id="modal-t">Connect a wallet</h2>
+    <p class="note">DALI only asks you to sign a message. It never moves your funds.</p>
+    <div id="wallet-list"></div>
+    <button class="close" type="button" id="modal-close">Close</button>
+  </div>
+</div>
+
+<template id="tpl-foot">
+  <div class="links">
+    <a href="#/scan">Scan</a><a href="#/vote">Vote</a><a href="#/how">How it works</a><a href="#/board">Board</a><a href="#" data-x>X</a><button type="button" data-replay>Replay intro</button>
+  </div>
+  <p>DALI reads public data and is not financial advice. Meme coins are highly volatile and you can lose everything.</p>
+  <p>DALI is an independent project. Not affiliated with or endorsed by Axiom or any trading platform.</p>
+</template>
+
+<!-- ============ INTRO (removable block: markup) ============ -->
+<div id="intro" hidden aria-label="Intro" role="presentation">
+  <canvas id="intro-cv"></canvas>
+  <img class="logoc" src="logo2-crop.png" alt="" aria-hidden="true">
+  <div class="hudc" id="intro-hud" aria-hidden="true"></div>
+  <div class="headc" id="intro-head" aria-hidden="true">Eight arms. One mind.</div>
+  <button class="skip" id="intro-skip" type="button">Skip</button>
+</div>
+<!-- ============ /INTRO ============ -->
+<script type="module">
+/* =====================================================================
+   DALI: single-file app. Sections: core, store, wallet, chain, scan, vote,
+   board, sound, intro (removable), scene (three.js), boot.
+   ===================================================================== */
+const C = window.DALI_CONFIG;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const REDUCED = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+const COARSE = (() => { try { return matchMedia('(pointer: coarse)').matches || innerWidth < 760; } catch { return false; } })();
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const shortAddr = a => a ? a.slice(0, 4) + '…' + a.slice(-4) : '';
+
+const ls = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } }
+};
+
+const fmtUsd = n => {
+  if (n == null || isNaN(n)) return 'unknown';
+  const a = Math.abs(n);
+  if (a >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (a >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+  return '$' + n.toFixed(a < 10 ? 2 : 0);
+};
+const fmtPct = (n, d = 1) => (n >= 0 ? '+' : '') + n.toFixed(d) + '%';
+const fmtNum = n => n == null ? '–' : Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const fmtDate = t => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 3200);
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok;
+    } catch { return false; }
+  }
+}
+const siteBase = () => (location.protocol.startsWith('http') ? location.href.split('#')[0] : location.href.split('#')[0]);
+const xIntent = text => 'https://x.com/intent/tweet?text=' + encodeURIComponent(text);
+
+/* ---------- base58 ---------- */
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58enc(bytes) {
+  const d = [0];
+  for (const b of bytes) {
+    let carry = b;
+    for (let j = 0; j < d.length; j++) { carry += d[j] << 8; d[j] = carry % 58; carry = (carry / 58) | 0; }
+    while (carry) { d.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let s = '';
+  for (const b of bytes) { if (b === 0) s += '1'; else break; }
+  for (let i = d.length - 1; i >= 0; i--) s += B58[d[i]];
+  return s;
+}
+function b58dec(str) {
+  const bytes = [0];
+  for (const ch of str) {
+    const v = B58.indexOf(ch); if (v < 0) return null;
+    let carry = v;
+    for (let j = 0; j < bytes.length; j++) { carry += bytes[j] * 58; bytes[j] = carry & 255; carry >>= 8; }
+    while (carry) { bytes.push(carry & 255); carry >>= 8; }
+  }
+  for (const ch of str) { if (ch === '1') bytes.push(0); else break; }
+  return new Uint8Array(bytes.reverse());
+}
+const isAddr = s => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s) && (b58dec(s) || []).length === 32;
+
+/* ---------- store (localStorage, optional backend mirror) ---------- */
+const KEY = 'dali.v1';
+const store = Object.assign({ proposals: [], votes: {}, scans: 0, coins: 0 }, ls.get(KEY, {}));
+const save = () => ls.set(KEY, { proposals: store.proposals, votes: store.votes, scans: store.scans, coins: store.coins });
+const SEEDS = [
+  { id: 'archivist', title: 'Wake the 7th arm: the Archivist', body: 'Archivist remembers every token DALI has read and warns you when a new token looks like one that rugged before.' },
+  { id: 'mapper', title: 'Wake the 7th arm: the Mapper', body: 'Mapper shows how top holders connect, so clusters of linked wallets stand out.' },
+  { id: 'listener', title: 'Add a Telegram arm: the Listener', body: "Listener checks whether a token's community is real or empty." }
+];
+SEEDS.push(
+  { id: 'auditor', title: 'Wake the 8th arm: the Auditor', body: 'Auditor checks whether a token\'s metadata and program can still be changed after launch, and flags upgrade authorities that are still open.' },
+  { id: 'watcher', title: 'Add a Watcher: alerts when a read token changes', body: 'Watcher re-reads tokens you scanned and tells you when liquidity drops, an authority turns on, or the top holders shift.' },
+  { id: 'cards', title: 'Dreamer share cards', body: 'Turn a verdict and the Dreamer\'s line into an image you can post on X, so a read travels with its reason.' }
+);
+// closed records from the team's own earlier decisions: results are stored as a tally
+const DAY = 864e5;
+const HISTORY = [
+  { id: 'h-dreamer', title: 'Add the Dreamer\'s caption to every read', body: 'Every read ends with one surreal line from the Dreamer, clearly marked as just for fun.', status: 'passed', tally: { yesPct: 82, noPct: 18 }, createdAt: Date.now() - 41 * DAY, endsAt: Date.now() - 34 * DAY },
+  { id: 'h-executor', title: 'Show price impact at your entry size', body: 'The Executor estimates how much your own buy would move the price, and says it is an estimate.', status: 'passed', tally: { yesPct: 74, noPct: 26 }, createdAt: Date.now() - 27 * DAY, endsAt: Date.now() - 20 * DAY },
+  { id: 'h-score', title: 'Rate every token out of ten', body: 'Replace the three verdicts with a single score from one to ten.', status: 'rejected', tally: { yesPct: 31, noPct: 69 }, createdAt: Date.now() - 19 * DAY, endsAt: Date.now() - 12 * DAY }
+];
+for (const s of SEEDS) {
+  if (!store.proposals.some(p => p.id === s.id)) store.proposals.push({ ...s, author: 'DALI team', status: 'open', createdAt: Date.now() - SEEDS.indexOf(s) * 3600e3, endsAt: null });
+}
+for (const h of HISTORY) if (!store.proposals.some(p => p.id === h.id)) store.proposals.push({ ...h, author: 'DALI team' });
+// demo votes so the board isn't empty: counted in totals, never listed under "Who voted". Delete before launch.
+const SEED_VOTES = { archivist: [9, 3], mapper: [5, 4], listener: [3, 4], auditor: [4, 1], watcher: [3, 1], cards: [1, 2] }; // [yes, no]
+for (const [pid, [y, n]] of Object.entries(SEED_VOTES)) {
+  const list = store.votes[pid] = store.votes[pid] || [];
+  if (list.some(v => v.seed)) continue;
+  const seeds = [...Array(y).fill('yes'), ...Array(n).fill('no')].map((choice, i) => ({ wallet: 'seed-' + pid + '-' + i, choice, weight: 1500 + ((i * 7919 + pid.length * 4421) % 40000), ts: Date.now() - (i + 1) * 5400e3, seed: true }));
+  list.unshift(...seeds);
+}
+save();
+
+async function api(path, body) {
+  if (!C.api || !C.features.api) return null;
+  try {
+    const r = await fetch(C.api.replace(/\/$/, '') + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+async function syncFromApi() {
+  const j = await api('/state');
+  if (!j) return;
+  for (const p of j.proposals || []) if (!store.proposals.some(x => x.id === p.id)) store.proposals.push(p);
+  for (const [pid, list] of Object.entries(j.votes || {})) {
+    const have = store.votes[pid] = store.votes[pid] || [];
+    for (const v of list) if (!have.some(x => x.wallet === v.wallet)) have.push(v);
+  }
+  save();
+  const sig = JSON.stringify([store.proposals.length, Object.entries(store.votes).map(([k, l]) => k + l.length)]);
+  if (sig === syncFromApi.last) return; syncFromApi.last = sig;
+  if (curRoute?.name === 'vote') renderVote(); if (curRoute?.name === 'board') renderBoard(); if (curRoute?.name === 'p') renderProposal(curRoute.arg);
+}
+function settle() {
+  const now = Date.now();
+  for (const p of store.proposals) {
+    if (p.status === 'open' && p.endsAt && now > p.endsAt) {
+      const s = propStats(p);
+      p.status = s.count >= C.quorum && s.yes > s.no ? 'passed' : 'rejected';
+    }
+  }
+}
+function propStats(p) {
+  if (p.tally) return { yes: 0, no: 0, yc: null, nc: null, count: 0, yesPct: p.tally.yesPct, noPct: p.tally.noPct, list: [], closed: true };
+  const list = store.votes[p.id] || [];
+  let yes = 0, no = 0, yc = 0, nc = 0;
+  for (const v of list) { if (v.choice === 'yes') { yes += v.weight || 0; yc++; } else { no += v.weight || 0; nc++; } }
+  const useW = yes + no > 0, tot = useW ? yes + no : yc + nc;
+  const y = useW ? yes : yc, n = useW ? no : nc;
+  return { yes: y, no: n, yc, nc, count: list.length, yesPct: tot ? (y / tot) * 100 : 0, noPct: tot ? (n / tot) * 100 : 0, list };
+}
+
+/* ---------- counter ---------- */
+function updateCounter() { $('#counter').textContent = (store.scans + store.coins).toLocaleString(); }
+
+/* ---------- sound (WebAudio, no files) ---------- */
+const Snd = {
+  ctx: null, on: false,
+  toggle() {
+    this.on = !this.on;
+    if (this.on) { try { this.ctx = this.ctx || new (window.AudioContext || window.webkitAudioContext)(); this.ctx.resume(); } catch { this.on = false; } }
+    const b = $('#sound'); b.setAttribute('aria-pressed', String(this.on)); b.textContent = this.on ? 'Sound on' : 'Sound off';
+    if (this.on) this.bubble(520);
+  },
+  tone(f, dur = .14, slide = 1.7, gain = .05, type = 'sine') {
+    if (!this.on || !this.ctx) return;
+    const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * slide, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + .015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + dur + .02);
+  },
+  bubble(f = 480) { this.tone(f, .12, 1.8, .05); },
+  boop() { this.tone(260, .18, 1.5, .07, 'triangle'); setTimeout(() => this.tone(390, .14, 1.4, .05), 80); },
+  snatch() { this.tone(700, .08, .6, .05); setTimeout(() => this.tone(540, .12, 1.8, .05), 70); },
+  arm(i) { this.tone([392, 440, 523, 587, 659, 784][i] || 440, .16, 1.25, .045); },
+  drop() { this.tone(900, .1, .55, .04); }
+};
+
+/* ---------- footer + token card ---------- */
+function mountFooters() {
+  const tpl = $('#tpl-foot');
+  $$('[data-foot]').forEach(f => { f.replaceChildren(tpl.content.cloneNode(true)); });
+  $$('[data-x]').forEach(a => { a.href = C.x || 'https://x.com/'; a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+}
+function renderTokenCards() {
+  $$('[data-token-card]').forEach(el => {
+    if (C.mint) {
+      el.innerHTML = `<span>Contract: <span class="mono">${esc(C.mint)}</span></span><button class="copy" type="button" data-copy-mint>Copy</button>`;
+    } else {
+      el.innerHTML = '<span>Contract address: announced at launch.</span>';
+    }
+    if (C.tradeUrl) {
+      const a = document.createElement('a');
+      a.className = 'ghost u'; a.textContent = 'Trade on Axiom'; a.href = C.tradeUrl; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      el.appendChild(a);
+    }
+  });
+}
+
+/* ---------- router ---------- */
+let curRoute = null, lastHash = null;
+const PAGES = { scan: '#page-scan', vote: '#page-vote', how: '#page-how', board: '#page-board', p: '#page-p' };
+function parseHash(h) {
+  const m = (h || '#/').replace(/^#\/?/, '').split('/').filter(Boolean);
+  const name = m[0] || 'home';
+  if (name === 'home' || !(name in PAGES)) return { name: 'home' };
+  return { name, arg: m[1] ? decodeURIComponent(m[1]) : null };
+}
+function go(h) {
+  try { if (location.hash !== h) location.hash = h; } catch { /* sandboxed frame */ }
+  route(h, true);
+}
+function route(h, force) {
+  h = h || location.hash || '#/';
+  if (h === lastHash && !force) return;
+  lastHash = h;
+  const r = curRoute = parseHash(h);
+  $('#topbar').classList.remove('open'); $('#menu-btn').setAttribute('aria-expanded', 'false');
+  document.body.classList.toggle('on-home', r.name === 'home');
+  $$('.page').forEach(p => { p.hidden = true; });
+  if (r.name !== 'home') { const pg = $(PAGES[r.name]); pg.hidden = false; pg.scrollTop = 0; pg.classList.remove('enter'); void pg.offsetWidth; pg.classList.add('enter'); reveal(pg); }
+  $$('#topbar nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === (r.name === 'p' ? 'vote' : r.name)));
+  window.DALI_scene?.setActive(r.name === 'home');
+  if (r.name === 'scan') { setStep(1); if (r.arg && isAddr(r.arg)) { $('#addr').value = r.arg; runScan(); } }
+  if (r.name === 'vote') renderVote();
+  if (r.name === 'board') renderBoard();
+  if (r.name === 'p') renderProposal(r.arg);
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href^="#/"]');
+  if (a) { e.preventDefault(); go(a.getAttribute('href')); return; }
+  if (e.target.closest('[data-copy-mint]')) { copyText(C.mint).then(() => toast('Contract copied.')); return; }
+  if (e.target.closest('[data-replay]')) { go('#/'); window.DALI_replay?.(); }
+});
+window.addEventListener('hashchange', () => route(location.hash));
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || document.documentElement.classList.contains('intro-playing')) return;
+  if (!$('#modal').hidden) { closeModal(); return; }
+  if (curRoute && curRoute.name !== 'home') go('#/');
+});
+$('#menu-btn').addEventListener('click', () => {
+  const t = $('#topbar'); const o = t.classList.toggle('open'); $('#menu-btn').setAttribute('aria-expanded', String(o));
+});
+
+/* =====================================================================
+   WALLET
+   ===================================================================== */
+const WALLETS = [
+  { id: 'phantom', name: 'Phantom', url: 'https://phantom.app/download', get: () => window.phantom?.solana?.isPhantom ? window.phantom.solana : (window.solana?.isPhantom ? window.solana : null) },
+  { id: 'solflare', name: 'Solflare', url: 'https://solflare.com/download', get: () => window.solflare?.isSolflare ? window.solflare : null },
+  { id: 'backpack', name: 'Backpack', url: 'https://backpack.app/downloads', get: () => window.backpack?.solana?.connect ? window.backpack.solana : (window.backpack?.isBackpack ? window.backpack : null) },
+  { id: 'coinbase', name: 'Coinbase Wallet', url: 'https://www.coinbase.com/wallet/downloads', get: () => window.coinbaseSolana || null },
+  { id: 'trust', name: 'Trust Wallet', url: 'https://trustwallet.com/download', get: () => window.trustwallet?.solana || null }
+];
+const wallet = { id: null, provider: null, address: null, balance: null, balAt: 0 };
+const bound = new WeakSet();
+
+function openModal() {
+  const list = $('#wallet-list'); list.replaceChildren();
+  for (const w of WALLETS) {
+    const det = !!w.get();
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'w' + (det ? ' det' : '');
+    b.innerHTML = `<span>${esc(w.name)}</span><small>${det ? 'Detected' : 'Install'}</small>`;
+    b.addEventListener('click', () => connectWallet(w.id));
+    list.appendChild(b);
+  }
+  $('#modal').hidden = false;
+  $('#wallet-list button')?.focus();
+}
+function closeModal() { $('#modal').hidden = true; }
+$('#modal-close').addEventListener('click', closeModal);
+$('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
+
+function bindProvider(p) {
+  if (bound.has(p) || !p.on) return;
+  bound.add(p);
+  p.on('accountChanged', async pk => {
+    if (pk) { wallet.address = pk.toString(); wallet.balance = null; walletUI(); await refreshWeight(true); }
+    else { try { const r = await p.connect(); setAddress(r?.publicKey ?? p.publicKey); } catch { clearWallet(false); } }
+  });
+  p.on('disconnect', () => clearWallet(false));
+}
+function setAddress(pk) {
+  wallet.address = pk ? pk.toString() : null; wallet.balance = null;
+  walletUI(); refreshWeight(true);
+}
+async function connectWallet(id, quiet) {
+  const w = WALLETS.find(x => x.id === id), p = w?.get();
+  if (!p) { if (!quiet) window.open(w.url, '_blank', 'noopener,noreferrer'); return; }
+  try {
+    const r = await (quiet ? p.connect({ onlyIfTrusted: true }) : p.connect());
+    const pk = r?.publicKey ?? p.publicKey;
+    if (!pk) throw new Error('no key');
+    wallet.id = id; wallet.provider = p; bindProvider(p); setAddress(pk);
+    ls.set('dali.wallet', id);
+    if (!quiet) { toast('Wallet connected.'); closeModal(); }
+  } catch (e) {
+    if (!quiet) toast('Connection cancelled. Nothing was sent.');
+  }
+}
+async function disconnectWallet() {
+  try { await wallet.provider?.disconnect?.(); } catch { /* ignore */ }
+  clearWallet(true);
+}
+function clearWallet(announce) {
+  wallet.id = null; wallet.provider = null; wallet.address = null; wallet.balance = null;
+  ls.set('dali.wallet', null); walletUI();
+  if (announce) toast('Wallet disconnected.');
+  if (curRoute?.name === 'vote') renderVote(); if (curRoute?.name === 'p') renderProposal(curRoute.arg);
+}
+function walletUI() {
+  const c = $('#connect'), d = $('#disconnect');
+  if (wallet.address) { c.innerHTML = `<span class="dot"></span>${esc(shortAddr(wallet.address))}`; d.hidden = false; c.title = wallet.address; $('#disconnect-m').hidden = false; }
+  else { c.textContent = 'Connect wallet'; d.hidden = true; $('#disconnect-m').hidden = true; c.removeAttribute('title'); }
+}
+$('#connect').addEventListener('click', () => { if (wallet.address) copyText(wallet.address).then(() => toast('Address copied.')); else openModal(); });
+$('#disconnect').addEventListener('click', disconnectWallet);
+$('#disconnect-m').addEventListener('click', () => { $('#topbar').classList.remove('open'); disconnectWallet(); });
+
+async function quietReconnect() {
+  const id = ls.get('dali.wallet', null); if (!id) return;
+  for (let i = 0; i < 4 && !wallet.address; i++) {          // providers can inject late
+    if (WALLETS.find(x => x.id === id)?.get()) { await connectWallet(id, true); break; }
+    await sleep(400);
+  }
+}
+async function signMsg(text) {
+  const p = wallet.provider; if (!p?.signMessage) throw new Error('nosign');
+  try {
+    const r = await p.signMessage(new TextEncoder().encode(text), 'utf8');
+    const sig = r?.signature ?? r;
+    return b58enc(sig instanceof Uint8Array ? sig : new Uint8Array(sig));
+  } catch (e) {
+    toast('Signature cancelled. Nothing was sent.'); throw e;
+  }
+}
+
+/* ---------- chain reads ---------- */
+async function rpc(method, params, ms = 14000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(C.rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: ctl.signal });
+    if (!r.ok) throw new Error('rpc ' + r.status);
+    const j = await r.json(); if (j.error) throw new Error(j.error.message);
+    return j.result;
+  } finally { clearTimeout(t); }
+}
+async function getWeight(force) {
+  if (!C.mint || !wallet.address) return null;
+  if (!force && wallet.balance != null && Date.now() - wallet.balAt < 30000) return wallet.balance;
+  try {
+    const r = await rpc('getTokenAccountsByOwner', [wallet.address, { mint: C.mint }, { encoding: 'jsonParsed' }]);
+    wallet.balance = (r.value || []).reduce((s, a) => s + (a.account.data.parsed.info.tokenAmount.uiAmount || 0), 0);
+    wallet.balAt = Date.now(); return wallet.balance;
+  } catch { toast("Couldn't reach the network. Try again in a moment."); return null; }
+}
+async function refreshWeight(force) {
+  await getWeight(force);
+  if (curRoute?.name === 'vote') renderVote(); if (curRoute?.name === 'p') renderProposal(curRoute.arg);
+}
+
+/* =====================================================================
+   SCAN
+   ===================================================================== */
+const ARMS = [
+  { id: 'scout', name: 'Scout', q: 'Is it new, liquid and moving?', c: '#2fd5b5' },
+  { id: 'tracker', name: 'Tracker', q: 'Who holds it?', c: '#4d8dff' },
+  { id: 'oracle', name: 'Oracle', q: 'Does it have a real home online?', note: 'Checks for linked website, X and Telegram. Not live sentiment.', c: '#ffb829' },
+  { id: 'skeptic', name: 'Skeptic', q: 'What could go wrong?', c: '#ff4f8b' },
+  { id: 'executor', name: 'Executor', q: 'Can you get in and out?', note: 'Price impact is an estimate.', c: '#8052ff' },
+  { id: 'dreamer', name: 'Dreamer', q: "Dreamer's take (just for fun)", c: '#c9a6ff' }
+];
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+function buildArmCards() {
+  $('#arms').innerHTML = ARMS.map(a => `
+    <article class="arm" id="arm-${a.id}" style="--c:${a.c}">
+      <h3><svg viewBox="0 0 20 20" aria-hidden="true"><use href="#tri"/></svg>${a.name}</h3>
+      <p class="q">${esc(a.q)}</p>
+      <div class="body"><p class="pending">Waiting…</p></div>
+    </article>`).join('');
+  $('#thresholds').innerHTML = [
+    `Liquidity under ${fmtUsd(C.minLiquidityUsd)} is an "Avoid".`,
+    `Top 10 holders owning more than ${C.maxTop10Pct}% is an "Avoid".`,
+    `Softer flags: pair younger than ${C.minPairAgeHours} hours, 24h volume under ${fmtUsd(C.lowVolumeUsd)}, no linked X or Telegram, a 1h move bigger than ${C.bigMove1hPct}%.`
+  ].map(t => `<li>${t}</li>`).join('');
+}
+function setStep(n) {
+  $$('#steps span').forEach(s => { const i = +s.dataset.s; s.className = i < n ? 'done' : i === n ? 'on' : ''; });
+}
+async function fetchJson(url, ms = 12000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(url, { signal: ctl.signal }); if (!r.ok) throw new Error('http ' + r.status); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+function bestPair(pairs, mint) {
+  const sol = (pairs || []).filter(p => p.chainId === 'solana');
+  const base = sol.filter(p => p.baseToken?.address === mint);
+  const pool = base.length ? base : sol.filter(p => p.quoteToken?.address === mint);
+  return pool.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0] || null;
+}
+function ageText(h) {
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + ' minutes';
+  if (h < 48) return Math.round(h) + ' hours';
+  return Math.round(h / 24) + ' days';
+}
+let scanBusy = false, scanRun = 0;
+
+async function runScan() {
+  const mint = $('#addr').value.trim(), sizeSol = parseFloat($('#size').value) || 1;
+  const err = $('#scan-err'); err.hidden = true;
+  const fail = m => { err.textContent = m; err.hidden = false; setStep(1); $('#scan-loading').hidden = true; $('#scan-empty').hidden = !$('#scan-result').hidden; };
+  if (!isAddr(mint)) return fail("That doesn't look like a Solana token address. Check it and try again.");
+  if (scanBusy) return;
+  scanBusy = true; const run = ++scanRun;
+  $('#read-btn').disabled = true;
+  $('#scan-empty').hidden = true; $('#scan-result').hidden = true; $('#scan-loading').hidden = false; $('#scan-partial').hidden = true; $('#verdict').hidden = true;
+  setStep(2);
+  window.dispatchEvent(new CustomEvent('dali:scan-start'));
+  try {
+    let dex;
+    try { dex = await fetchJson('https://api.dexscreener.com/latest/dex/tokens/' + mint); }
+    catch { return fail("Couldn't reach the data source. Try again in a moment."); }
+    const pair = bestPair(dex.pairs, mint);
+    if (!pair) return fail("DALI couldn't find a trading pair for that token yet.");
+
+    const [mintR, largestR, solR] = await Promise.allSettled([
+      rpc('getAccountInfo', [mint, { encoding: 'jsonParsed' }]),
+      rpc('getTokenLargestAccounts', [mint]),
+      pair.quoteToken?.address === SOL_MINT && +pair.priceNative > 0
+        ? Promise.resolve(+pair.priceUsd / +pair.priceNative)
+        : fetchJson('https://api.dexscreener.com/latest/dex/tokens/' + SOL_MINT).then(j => +bestPair(j.pairs, SOL_MINT)?.priceUsd)
+    ]);
+    const d = { pair, mint, sizeSol, partial: false };
+    const info = mintR.status === 'fulfilled' ? mintR.value?.value?.data?.parsed?.info : null;
+    if (info && mintR.value.value.data.parsed.type === 'mint') {
+      d.mintActive = !!info.mintAuthority; d.freezeActive = !!info.freezeAuthority;
+      d.supply = Number(info.supply) / 10 ** info.decimals;
+    } else { d.mintActive = null; d.freezeActive = null; d.partial = true; }
+    if (largestR.status === 'fulfilled' && d.supply > 0) {
+      const top = (largestR.value.value || []).slice(0, 10).reduce((s, a) => s + (a.uiAmount || 0), 0);
+      d.top10 = Math.min(100, (top / d.supply) * 100);
+    } else { d.top10 = null; d.partial = true; }
+    d.solUsd = solR.status === 'fulfilled' && solR.value > 0 ? solR.value : null;
+    if (d.solUsd == null) d.partial = true;
+
+    const res = analyze(d);
+    if (run !== scanRun) return;
+    $('#scan-loading').hidden = true; $('#scan-result').hidden = false;
+    buildArmCards();
+    $('#scan-partial').hidden = !d.partial;
+    for (let i = 0; i < ARMS.length; i++) {
+      await sleep(REDUCED ? 60 : 420);
+      if (run !== scanRun) return;
+      const a = ARMS[i], el = $('#arm-' + a.id);
+      el.querySelector('.body').innerHTML = res.arms[a.id];
+      el.classList.add('lit');
+      Snd.arm(i);
+      window.dispatchEvent(new CustomEvent('dali:arm', { detail: { index: i, color: a.c } }));
+    }
+    await sleep(REDUCED ? 0 : 300);
+    showVerdict(res, d);
+    setStep(3); rememberRead(mint, res.sym, res.verdict);
+    store.scans++; save(); updateCounter();
+    try { history.replaceState(null, '', '#/scan/' + mint); lastHash = '#/scan/' + mint; } catch { /* ignore */ }
+  } catch (e) {
+    fail("Couldn't reach the data source. Try again in a moment.");
+  } finally { scanBusy = false; $('#read-btn').disabled = false; }
+}
+
+/* the whole rule set in one place: used by real scans and by the playground on the How page */
+function decide(f, sym) {
+  const young = f.age != null && f.age < C.minPairAgeHours, lowLiq = f.liq != null && f.liq < C.minLiquidityUsd;
+  const conc = f.top10 != null && f.top10 > C.maxTop10Pct, lowVol = f.vol != null && f.vol < C.lowVolumeUsd;
+  const bigMove = f.h1 != null && Math.abs(f.h1) > C.bigMove1hPct;
+  const avoid = [];
+  if (f.mintActive === true) avoid.push('the mint authority is still active, so more tokens can be created');
+  if (f.freezeActive === true) avoid.push('the freeze authority is active, so wallets can be frozen');
+  if (lowLiq) avoid.push(`liquidity is only about ${fmtUsd(f.liq)}`);
+  if (conc) avoid.push(`the top 10 holders own ${f.top10.toFixed(1)}% of the supply`);
+  const soft = [];
+  if (young) soft.push(`the pair is only ${ageText(f.age)} old`);
+  if (lowVol) soft.push(`24h volume is just ${fmtUsd(f.vol)}`);
+  if (f.noSoc) soft.push('no X or Telegram is linked');
+  if (bigMove) soft.push(`the price moved ${fmtPct(f.h1, 0)} in the last hour`);
+  const unknown = [];
+  if (f.mintActive == null || f.freezeActive == null) unknown.push("DALI couldn't check the mint and freeze authorities");
+  if (f.top10 == null) unknown.push("DALI couldn't read the holders");
+  let verdict, sentence, oneLine;
+  if (avoid.length) {
+    verdict = 'Avoid'; sentence = `${sym}: avoid. ${cap(avoid.join('; and '))}.`; oneLine = cap(avoid[0]);
+  } else if (soft.length + unknown.length >= 2 || unknown.length) {
+    verdict = 'Risky';
+    const rs = [...soft, ...unknown], extra = rs.length - 2;
+    sentence = rs.length === 1
+      ? `${sym} is risky. ${cap(rs[0])}. If you go in, go small.`
+      : `${sym} is risky. ${cap(rs[0])} and ${rs[1]}${extra > 0 ? `, plus ${extra} more flag${extra > 1 ? 's' : ''}` : ''}. If you go in, go small.`;
+    oneLine = cap(rs[0]);
+  } else {
+    verdict = 'Clean read';
+    sentence = `${sym} looks clean on the basics. Liquidity is about ${fmtUsd(f.liq)}, the top 10 holders own ${f.top10.toFixed(1)}%, and the mint and freeze authorities are off.`;
+    oneLine = 'The basics look clean';
+  }
+  return { verdict, sentence, oneLine, avoid, soft, unknown };
+}
+function li(kind, label, text) { return `<li><span class="k ${kind}">${label}</span>${text}</li>`; }
+function analyze(d) {
+  const { pair: p } = d;
+  const sym = (p.baseToken?.address === d.mint ? p.baseToken : p.quoteToken)?.symbol?.toUpperCase() || 'This token';
+  const name = (p.baseToken?.address === d.mint ? p.baseToken : p.quoteToken)?.name || sym;
+  const liq = p.liquidity?.usd ?? null, vol = p.volume?.h24 ?? null;
+  const h1 = p.priceChange?.h1 ?? null, h24 = p.priceChange?.h24 ?? null;
+  const age = p.pairCreatedAt ? (Date.now() - p.pairCreatedAt) / 36e5 : null;
+  const socials = p.info?.socials || [], hasX = socials.some(s => s.type === 'twitter'), hasTg = socials.some(s => s.type === 'telegram');
+  const hasWeb = (p.info?.websites || []).length > 0;
+
+  const young = age != null && age < C.minPairAgeHours, lowLiq = liq != null && liq < C.minLiquidityUsd;
+  const conc = d.top10 != null && d.top10 > C.maxTop10Pct, lowVol = vol != null && vol < C.lowVolumeUsd;
+  const noSoc = !hasX && !hasTg, bigMove = h1 != null && Math.abs(h1) > C.bigMove1hPct;
+
+  const { verdict, sentence, oneLine } = decide({ mintActive: d.mintActive, freezeActive: d.freezeActive, liq, top10: d.top10, age, vol, noSoc, h1 }, sym);
+
+  /* Scout */
+  const scout = '<ul>' + [
+    age != null ? li(young ? 'warn' : 'ok', young ? 'Young' : 'Age', `Pair age: ${ageText(age)}`) : li('na', 'Age', 'Pair age: unknown'),
+    li(lowLiq ? 'bad' : 'ok', lowLiq ? 'Low' : 'Depth', `Liquidity: ${fmtUsd(liq)}`),
+    li(bigMove ? 'warn' : 'ok', 'Move', `Price: ${h1 != null ? '1h ' + fmtPct(h1) : '1h unknown'}, ${h24 != null ? '24h ' + fmtPct(h24) : '24h unknown'}`),
+    li(lowVol ? 'warn' : 'ok', lowVol ? 'Quiet' : 'Volume', `24h volume: ${fmtUsd(vol)}`)
+  ].join('') + '</ul>';
+  /* Tracker */
+  const tracker = d.top10 == null
+    ? '<p class="pending">Couldn\'t read the holder list from the chain.</p>'
+    : `<ul>${li(conc ? 'bad' : 'ok', conc ? 'High' : 'Spread', `The top 10 holders own ${d.top10.toFixed(1)}% of the supply.`)}</ul><p class="note">Liquidity pool accounts can sit in the top 10, which makes this number read higher.</p>`;
+  /* Oracle */
+  const n = [hasWeb, hasX, hasTg].filter(Boolean).length;
+  const oracle = `<ul>${[['Website', hasWeb], ['X', hasX], ['Telegram', hasTg]].map(([k, v]) => li(v ? 'ok' : 'na', v ? 'Linked' : 'None', k)).join('')}</ul><p class="note">${n} of 3 links found. ${esc(ARMS[2].note)}</p>`;
+  /* Skeptic */
+  const flag = (on, unk, bad, ok) => unk ? li('na', 'Unknown', "DALI couldn't check this.") : on ? li('bad', 'Red flag', bad) : li('ok', 'Clear', ok);
+  const skeptic = '<ul>' + [
+    flag(d.mintActive === true, d.mintActive == null, 'Mint authority is active.', 'Mint authority is off.'),
+    flag(d.freezeActive === true, d.freezeActive == null, 'Freeze authority is active.', 'Freeze authority is off.'),
+    flag(young, age == null, `Very young pair (${age != null ? ageText(age) : ''}).`, 'Pair is not brand new.'),
+    flag(lowLiq, liq == null, `Very low liquidity (${fmtUsd(liq)}).`, 'Liquidity is above the floor.'),
+    flag(conc, d.top10 == null, `High holder concentration (${d.top10?.toFixed(1)}%).`, 'Holders are reasonably spread.')
+  ].join('') + '</ul>';
+  /* Executor */
+  let executor;
+  if (liq > 0 && d.solUsd) {
+    const usd = d.sizeSol * d.solUsd, impact = (usd / (liq / 2 + usd)) * 100;
+    const k = impact < 2 ? 'ok' : impact < 8 ? 'warn' : 'bad';
+    const msg = impact < 2 ? 'Entering and leaving at this size should barely move the price.' : impact < 8 ? 'You would move the price noticeably.' : 'You would move the price a lot. Consider a smaller size.';
+    executor = `<ul>${li(k, k === 'ok' ? 'Easy' : k === 'warn' ? 'Noticeable' : 'Heavy', `At ${fmtNum(d.sizeSol)} SOL (about ${fmtUsd(usd)}), the price impact is about ${impact.toFixed(impact < 1 ? 2 : 1)}% each way.`)}<li>${msg}</li></ul><p class="note">${esc(ARMS[4].note)} It assumes a simple pool and ignores fees and slippage settings.</p>`;
+  } else executor = '<p class="pending">Couldn\'t estimate price impact without liquidity and a SOL price.</p>';
+  /* Dreamer */
+  const dream = dreamLine(sym, verdict, d.mint);
+  const link = siteBase() + '#/scan/' + d.mint;
+  const post = `DALI read $${sym}: ${verdict}. ${oneLine}. 8 arms, 1 mind. ${link}`;
+  const dreamer = `<ul><li>${esc(dream)}</li></ul><div class="tools"><a class="ghost u" href="${esc(xIntent(post))}" target="_blank" rel="noopener noreferrer">Share on X</a></div>`;
+
+  return { verdict, sentence, sym, name, post, arms: { scout, tracker, oracle, skeptic, executor, dreamer } };
+}
+function dreamLine(sym, verdict, mint) {
+  const T = {
+    'Clean read': [`${sym} is a clock hung out to dry, and it still keeps perfect time.`, `Eight arms looked at ${sym} and none of them frowned.`, `${sym} floats like a jellyfish at noon: lovely, translucent, easy to read.`, `A calm tide under ${sym}. The octopus yawns.`],
+    'Risky': [`${sym} melts a little at the edges. Hold it by the part that still has numbers.`, `The clock on ${sym} runs fast and tells everyone it's early.`, `${sym} whispers in bubbles. Some of them are true.`, `A drip of time falls off ${sym}. The octopus counts it twice.`],
+    'Avoid': [`The clock on ${sym} has stopped, and someone is still selling tickets.`, `${sym} is a trapdoor painted like a floor.`, `Somewhere under ${sym}, a very large mouth is learning to smile.`, `${sym} melts faster than the arms can read.`]
+  }[verdict];
+  let h = 0; for (const ch of mint) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return T[h % T.length];
+}
+function showVerdict(res) {
+  const cls = res.verdict === 'Clean read' ? 'clean' : res.verdict === 'Risky' ? 'risky' : 'avoid';
+  const v = $('#verdict');
+  v.innerHTML = `
+    <span class="badge ${cls}">${res.verdict}</span>
+    <p class="sentence">${esc(res.sentence)}</p>
+    <p class="never">A clean read is not a safe bet. Meme coins can go to zero.</p>
+    <div class="tools"><a class="btn" href="${esc(xIntent(res.post))}" target="_blank" rel="noopener noreferrer">Share on X</a></div>`;
+  v.hidden = false;
+  v.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' });
+}
+$('#scan-form').addEventListener('submit', e => { e.preventDefault(); runScan(); });
+
+/* ---------- shared page helpers ---------- */
+function reveal(root) {
+  const page = root.closest?.('.page') || root;
+  const els = $$('.rv:not(.in)', root);
+  if (REDUCED || !('IntersectionObserver' in window)) { els.forEach(e => e.classList.add('in')); return; }
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { root: page.classList?.contains('page') ? page : null, threshold: .15 });
+  els.forEach(e => io.observe(e));
+}
+function countTo(el, n, text) {
+  if (REDUCED || typeof n !== 'number') { el.textContent = text ?? n; return; }
+  const from = parseFloat(el.dataset.v || '0') || 0, t0 = performance.now(), dur = 700;
+  el.dataset.v = n;
+  const step = now => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = Math.round(from + (n - from) * e).toLocaleString(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+
+/* =====================================================================
+   VOTE / PROPOSAL / BOARD
+   ===================================================================== */
+function voteGate() {
+  if (!C.mint) return { state: 'readonly', text: 'Voting opens at launch.' };
+  if (!wallet.address) return { state: 'connect', text: 'Connect a wallet to vote.' };
+  if (wallet.balance == null) return { state: 'loading', text: 'Reading your DALI balance…' };
+  if (wallet.balance <= 0) return { state: 'nobal', text: 'You need DALI in this wallet to vote.' };
+  return { state: 'ok', text: '' };
+}
+const voted = () => ls.get('dali.voted', {});
+const shareUrl = p => siteBase() + '#/p/' + p.id;
+const sharePost = p => `Vote on DALI's next arm: "${p.title}". 8 arms, 1 mind. ${shareUrl(p)}`;
+function propBlock(p, full) {
+  const s = propStats(p), gate = voteGate(), open = p.status === 'open';
+  const mine = (wallet.address && s.list.find(v => v.wallet === wallet.address)) || (voted()[p.id] ? { choice: voted()[p.id].choice, ts: voted()[p.id].ts } : null);
+  const bar = (k, label, pct, n) => `<div class="bar ${k}"><span>${label}</span><div class="track"><div class="fill" style="--w:${pct.toFixed(1)}%"></div></div><span class="v">${pct.toFixed(0)}%${n == null ? '' : ' · ' + n}</span></div>`;
+  const status = open ? (C.mint ? '<span class="pill open">Open</span>' : '<span class="pill soon">Opens at launch</span>') : `<span class="pill ${p.status}">${p.status === 'passed' ? 'Passed' : 'Rejected'}</span>`;
+  const qpct = s.closed ? 100 : Math.min(100, (s.count / C.quorum) * 100);
+  let actions = '';
+  if (open) {
+    const dis = gate.state !== 'ok' || mine ? 'disabled' : '';
+    actions = `<div class="vote-actions">
+      <button class="btn" type="button" data-vote="yes" data-id="${esc(p.id)}" ${dis}>Vote Yes</button>
+      <button class="ghost u" type="button" data-vote="no" data-id="${esc(p.id)}" ${dis}>Vote No</button>
+      ${mine ? `<span class="vote-note">You voted ${mine.choice === 'yes' ? 'Yes' : 'No'}. Signed ${fmtDate(mine.ts)}.</span>` : gate.state === 'connect' ? `<button class="ghost u" type="button" data-connect>Connect wallet</button><span class="vote-note">${gate.text}</span>` : gate.text ? `<span class="vote-note">${gate.text}</span>` : ''}
+    </div>`;
+  }
+  return `<article class="prop rv" data-id="${esc(p.id)}">
+    <div class="head">${status}<p class="by">By ${esc(p.author)} · ${fmtDate(p.createdAt)}</p></div>
+    <h3>${full ? esc(p.title) : `<a href="#/p/${esc(p.id)}">${esc(p.title)}</a>`}</h3>
+    <p class="body">${esc(p.body)}</p>
+    <div class="bars">${bar('yes', 'Yes', s.yesPct, s.yc)}${bar('no', 'No', s.noPct, s.nc)}</div>
+    <div class="qmeter"><p class="quorum">Quorum: ${C.quorum} votes needed${s.closed ? ' · reached' : ' · ' + s.count + ' cast'}</p><div class="track"><i style="--w:${qpct.toFixed(1)}%"></i></div></div>
+    ${actions}
+    <div class="tools"><a href="${esc(xIntent(sharePost(p)))}" target="_blank" rel="noopener noreferrer">Share on X</a><button type="button" data-copylink="${esc(shareUrl(p))}">Copy link</button>${full ? '' : `<a href="#/p/${esc(p.id)}">Open proposal</a>`}</div>
+  </article>`;
+}
+let voteSort = 'newest';
+function renderVote() {
+  settle();
+  const open = store.proposals.filter(p => p.status === 'open');
+  countTo($('#t-open'), open.length);
+  countTo($('#t-votes'), Object.values(store.votes).reduce((s, l) => s + l.length, 0));
+  const tw = $('#t-weight');
+  if (!C.mint || !wallet.address) tw.textContent = '–'; else if (wallet.balance == null) tw.textContent = '…'; else countTo(tw, Math.floor(wallet.balance));
+  const g = voteGate();
+  const n = $('#vote-notice'); n.hidden = g.state !== 'readonly'; n.textContent = g.text;
+  const have = [!!wallet.address && !!C.mint, g.state === 'ok'];
+  $$('#gate .gstep').forEach((el, i) => {
+    el.classList.toggle('done', i < 2 ? have[i] : false);
+    el.classList.toggle('active', C.mint && (i === 0 ? !have[0] : i === 1 ? have[0] && !have[1] : have[1]));
+  });
+  const list = [...open].sort((a, b) => voteSort === 'votes' ? propStats(b).count - propStats(a).count || b.createdAt - a.createdAt : b.createdAt - a.createdAt);
+  $('#props').innerHTML = list.map(p => propBlock(p, false)).join('') || '<p class="empty">No open proposals right now.</p>';
+  $$('#sort-chips button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sort === voteSort)));
+  const pn = $('#p-note'), ok = g.state === 'ok';
+  pn.hidden = ok; pn.textContent = g.text; $('#p-submit').disabled = !ok;
+  reveal($('#page-vote'));
+}
+$('#sort-chips').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; voteSort = b.dataset.sort; renderVote(); });
+for (const [id, cid, max] of [['p-title', 'c-title', 90], ['p-body', 'c-body', 400]]) {
+  $('#' + id).addEventListener('input', () => {
+    $('#' + cid).textContent = $('#' + id).value.length + ' / ' + max;
+    $('#pv-title').textContent = $('#p-title').value.trim() || 'Your title';
+    $('#pv-body').textContent = $('#p-body').value.trim() || 'Your description appears here.';
+  });
+}
+function renderProposal(id) {
+  const p = store.proposals.find(x => x.id === id), v = $('#p-view');
+  if (!p) { v.innerHTML = '<h1 class="page-title">Proposal not found</h1><p class="page-sub">This link doesn\'t match a proposal in this browser.</p>'; return; }
+  const s = propStats(p), open = p.status === 'open';
+  const opens = store.proposals.filter(x => x.status === 'open'), i = opens.findIndex(x => x.id === p.id);
+  const next = opens.length > 1 ? opens[(i + 1) % opens.length] : null;
+  const status = open ? (C.mint ? '<span class="pill open">Open</span>' : '<span class="pill soon">Opens at launch</span>') : `<span class="pill ${p.status}">${p.status === 'passed' ? 'Passed' : 'Rejected'}</span>`;
+  v.innerHTML = `<div class="p-hero"><div class="head" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${status}<span class="dim" style="font-size:13px">By ${esc(p.author)} · ${fmtDate(p.createdAt)}</span></div>
+    <h1 class="page-title" style="font-size:clamp(36px,5.4vw,76px)">${esc(p.title)}</h1>
+    <p class="page-sub" style="margin-bottom:0">${esc(p.body)}</p></div>
+    <div class="tools" style="display:flex;gap:12px;flex-wrap:wrap;margin:24px 0 0;align-items:center"><a class="btn" href="${esc(xIntent(sharePost(p)))}" target="_blank" rel="noopener noreferrer">Share on X</a><button class="ghost u" type="button" data-copylink="${esc(shareUrl(p))}">Copy link</button></div>
+    <div class="p-grid">
+      <div>
+        <div class="p-big"><div><div class="n y">${s.yesPct.toFixed(0)}%</div><div class="l">Yes${s.yc == null ? '' : ' · ' + s.yc + ' votes'}</div></div><div><div class="n no">${s.noPct.toFixed(0)}%</div><div class="l">No${s.nc == null ? '' : ' · ' + s.nc + ' votes'}</div></div></div>
+        ${propBlock(p, true).replace('class="prop rv"', 'class="prop"')}
+      </div>
+      <aside class="p-side"><p class="cap">Who voted</p>${s.list.some(vt => !vt.seed) ? `<div class="voters">${s.list.filter(vt => !vt.seed).map(vt => `<div><span>${esc(shortAddr(vt.wallet))}</span><span>${vt.choice === 'yes' ? 'Yes' : 'No'} · ${fmtNum(vt.weight)}</span></div>`).join('')}</div>` : '<p class="dim" style="font-size:15px">No votes yet. Every vote is shown here with its wallet.</p>'}
+      ${next ? `<div class="p-adj"><span class="cap" style="margin:0">Next proposal</span><a href="#/p/${esc(next.id)}">${esc(next.title)}</a></div>` : ''}</aside>
+    </div>`;
+}
+function renderBoard() {
+  settle();
+  const done = store.proposals.filter(p => p.status === 'passed'), rej = store.proposals.filter(p => p.status === 'rejected');
+  countTo($('#b-pass'), done.length); countTo($('#b-rej'), rej.length); countTo($('#b-deb'), 0);
+  $('#tc-c').textContent = done.length; $('#tc-r').textContent = rej.length; $('#tc-d').textContent = 0;
+  const tab = $('#board-tabs [aria-selected="true"]').dataset.tab, el = $('#board-list');
+  const card = p => { const s = propStats(p); return `<article class="prop rv"><div class="when">${fmtDate(p.endsAt || p.createdAt)}</div><div>
+    <div class="head"><span class="pill ${p.status}">${p.status === 'passed' ? 'Passed' : 'Rejected'}</span></div>
+    <h3><a href="#/p/${esc(p.id)}">${esc(p.title)}</a></h3>
+    <div class="meta"><span>Result: ${p.status === 'passed' ? 'Passed' : 'Rejected'}</span><span>Yes ${s.yesPct.toFixed(0)}%</span><span>No ${s.noPct.toFixed(0)}%</span><a class="ghost u" style="padding:0" href="#/p/${esc(p.id)}">View proposal</a></div></div></article>`; };
+  const rows = tab === 'completed' ? done : tab === 'rejected' ? rej : [];
+  const copy = { completed: 'Nothing has passed yet. The first votes open at launch.', rejected: 'Nothing has been rejected yet.', debates: 'When the Skeptic and the Dreamer disagree about a token, the debate lands here.' }[tab];
+  const cta = tab === 'debates' ? '<a class="ghost u" href="#/scan" style="padding-left:0">Scan a token</a>' : '<a class="ghost u" href="#/vote" style="padding-left:0">See open proposals</a>';
+  const sleepy = '<img src="logo2-crop.png" alt="">';
+  el.innerHTML = rows.length ? `<div class="hist">${rows.map(card).join('')}</div>` : `<div class="empty-wrap">${sleepy}<div><p class="empty">${copy}</p>${cta}</div></div>`;
+  reveal($('#page-board'));
+}
+$('#board-tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('#board-tabs button').forEach(x => x.setAttribute('aria-selected', String(x === b))); renderBoard();
+});
+
+document.addEventListener('click', async e => {
+  const cl = e.target.closest('[data-copylink]'); if (cl) { if (await copyText(cl.dataset.copylink)) toast('Link copied.'); return; }
+  if (e.target.closest('[data-connect]')) { openModal(); return; }
+  const vb = e.target.closest('[data-vote]'); if (!vb || vb.disabled) return;
+  const p = store.proposals.find(x => x.id === vb.dataset.id), choice = vb.dataset.vote;
+  if (voted()[p.id]) { toast('You already voted on this proposal.'); return; }
+  const label = vb.textContent; vb.classList.add('busy'); vb.textContent = 'Waiting for your wallet…';
+  const reset = () => { vb.classList.remove('busy'); vb.textContent = label; };
+  const weight = await getWeight(true);
+  if (!weight || weight <= 0) { reset(); toast('You need DALI in this wallet to vote.'); return; }
+  const msg = `DALI vote\nProposal: ${p.title} (${p.id})\nChoice: ${choice.toUpperCase()}\nWallet: ${wallet.address}\nTime: ${new Date().toISOString()}`;
+  let sig; try { sig = await signMsg(msg); } catch { reset(); return; }
+  const list = store.votes[p.id] = store.votes[p.id] || [];
+  if (list.some(v => v.wallet === wallet.address) || voted()[p.id]) { reset(); toast('You already voted on this proposal.'); return; }
+  const rec = { wallet: wallet.address, choice, weight, sig, msg, ts: Date.now() };
+  list.push(rec); save(); ls.set('dali.voted', { ...voted(), [p.id]: { choice, ts: rec.ts } }); api('/votes', { proposal: p.id, ...rec });
+  toast('Vote recorded.');
+  curRoute.name === 'p' ? renderProposal(p.id) : renderVote();
+  const art = $(`.prop[data-id="${p.id}"]`); art?.classList.add('in', 'flash');
+});
+$('#prop-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (voteGate().state !== 'ok') return;
+  const title = $('#p-title').value.trim(), body = $('#p-body').value.trim(); if (!title || !body) return;
+  let sig; try { sig = await signMsg(`DALI proposal\nTitle: ${title}\nBody: ${body}\nWallet: ${wallet.address}\nTime: ${new Date().toISOString()}`); } catch { return; }
+  const p = { id: 'u' + Date.now().toString(36), title, body, author: shortAddr(wallet.address), wallet: wallet.address, sig, status: 'open', createdAt: Date.now(), endsAt: null };
+  store.proposals.push(p); save(); api('/proposals', p);
+  e.target.reset(); $('#c-title').textContent = '0 / 90'; $('#c-body').textContent = '0 / 400'; $('#pv-title').textContent = 'Your title'; $('#pv-body').textContent = 'Your description appears here.';
+  renderVote(); toast('Proposal submitted.');
+});
+
+/* =====================================================================
+   SCAN extras: paste, size chips, recent reads
+   ===================================================================== */
+function renderRecent() {
+  const list = ls.get('dali.recent', []);
+  $('#recent').hidden = !list.length;
+  const col = { 'Clean read': '#15846e', 'Risky': '#ffb829', 'Avoid': '#ff5470' };
+  $('#recent-list').innerHTML = list.map(r => `<a href="#/scan/${esc(r.mint)}"><i style="background:${col[r.verdict]}"></i>${esc(r.sym)} · ${esc(r.verdict)}</a>`).join('');
+}
+function rememberRead(mint, sym, verdict) {
+  const list = ls.get('dali.recent', []).filter(r => r.mint !== mint); list.unshift({ mint, sym, verdict }); ls.set('dali.recent', list.slice(0, 6)); renderRecent();
+}
+$('#paste-btn').addEventListener('click', async () => {
+  try { const t = (await navigator.clipboard.readText()).trim(); if (t) { $('#addr').value = t; if (isAddr(t)) runScan(); } else toast('Your clipboard is empty.'); }
+  catch { toast('Paste with Ctrl+V or Cmd+V instead.'); $('#addr').focus(); }
+});
+$('#size-chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { $('#size').value = b.dataset.size; syncSizeChips(); } });
+$('#size').addEventListener('input', syncSizeChips);
+function syncSizeChips() { $$('#size-chips button').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.size) === parseFloat($('#size').value))); }
+
+/* =====================================================================
+   HOW page: rail, arm accordion, rules playground, side tabs
+   ===================================================================== */
+const ARM_INFO = {
+  scout: 'Reads the trading pair: how old it is, how much liquidity sits behind it, and how the price moved over 1 hour and 24 hours.',
+  tracker: 'Reads the chain for the ten largest holder accounts and adds up their share of the supply.',
+  oracle: 'Checks whether the token profile links a website, X and Telegram. It checks links, not live sentiment.',
+  skeptic: 'Looks for red flags: mint authority, freeze authority, a very young pair, very low liquidity and heavy holder concentration.',
+  executor: 'Estimates the price impact of getting in and out at your entry size, using the depth of the pool. It is an estimate.',
+  dreamer: 'Writes a one-line surreal caption for the token. Just for fun.'
+};
+function initHow() {
+  const tri = '<svg viewBox="0 0 20 20"><use href="#tri"/></svg>';
+  $('#arm-acc').innerHTML = ARMS.map(a => `<div class="acc-item" style="--c:${a.c}"><button type="button" aria-expanded="false">${tri}${a.name}<small>${esc(a.q)}</small></button><div class="acc-body"><div><p>${esc(ARM_INFO[a.id])}</p></div></div></div>`).join('')
+    + ['7th', '8th'].map(n => `<div class="acc-item asleep" style="--c:#777"><button type="button" aria-expanded="false">${tri}The ${n} arm<small>Asleep</small></button><div class="acc-body"><div><p>Still asleep. Holders vote on which arm wakes next.</p><p style="padding-top:0"><a class="ghost u" href="#/vote" style="padding-left:0">See open proposals</a></p></div></div></div>`).join('');
+  $('#arm-acc').addEventListener('click', e => {
+    const b = e.target.closest('.acc-item>button'); if (!b) return;
+    const it = b.parentElement, open = !it.classList.contains('open');
+    $$('#arm-acc .acc-item.open').forEach(x => { x.classList.remove('open'); x.firstElementChild.setAttribute('aria-expanded', 'false'); });
+    if (open) { it.classList.add('open'); b.setAttribute('aria-expanded', 'true'); Snd.bubble(500); }
+  });
+  // rail: jump + scroll spy
+  const page = $('#page-how');
+  $('#how-rail').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $('#how-' + b.dataset.step).scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'start' });
+  });
+  const secs = $$('#page-how [data-step]').filter(s => s.id);
+  if ('IntersectionObserver' in window) {
+    const spy = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) { $$('#how-rail button').forEach(b => b.classList.toggle('on', b.dataset.step === en.target.dataset.step)); } }), { root: page, rootMargin: '-30% 0px -60% 0px' });
+    secs.forEach(s => spy.observe(s));
+  }
+  // side tabs
+  const SIDES = [
+    ['"A fast second opinion before I ape, with the reasons shown."', 'Traders'],
+    ['"A real tool, and a real say in what gets built next."', 'Holders'],
+    ["DALI doesn't replace the tools you already trade with. Use it to read a token, then trade wherever you normally do.", 'Works alongside your terminal']
+  ];
+  const showSide = i => {
+    $$('#side-tabs button').forEach((b, k) => b.setAttribute('aria-selected', String(k === i)));
+    const el = $('#side-body'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; el.textContent = SIDES[i][0];
+  };
+  $('#side-tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showSide(+b.dataset.side); });
+  showSide(0);
+  initSim();
+}
+function initSim() {
+  const S = { liq: 50000, top10: 30, age: 72, vol: 100000, move: 4, mint: false, freeze: false, soc: true };
+  const log = (v, a, b) => Math.round(Math.pow(10, a + (v / 100) * (b - a)));
+  const inv = (x, a, b) => Math.round(((Math.log10(x) - a) / (b - a)) * 100);
+  const R = (id, label, min, max, val, fmt) => `<div class="rng"><label for="${id}">${label}<b id="${id}-v">${fmt(val)}</b></label><input type="range" id="${id}" min="${min}" max="${max}" value="${val}"></div>`;
+  const T = (id, label, on) => `<button type="button" class="tg" role="switch" id="${id}" aria-checked="${on}">${label}<i></i></button>`;
+  $('#sim').innerHTML = `<div class="sim-ctl">
+      ${R('s-liq', 'Liquidity', 0, 100, inv(S.liq, 2.7, 6), v => fmtUsd(log(v, 2.7, 6)))}
+      ${R('s-top', 'Top 10 holders own', 1, 99, S.top10, v => v + '%')}
+      ${R('s-age', 'Pair age', 1, 240, S.age, v => v + ' h')}
+      ${R('s-vol', '24h volume', 0, 100, inv(S.vol, 2, 6.5), v => fmtUsd(log(v, 2, 6.5)))}
+      ${R('s-move', '1h price move', 0, 90, S.move, v => '±' + v + '%')}
+      ${T('s-mint', 'Mint authority is active', false)}${T('s-freeze', 'Freeze authority is active', false)}${T('s-soc', 'X or Telegram is linked', true)}
+    </div>
+    <div class="sim-out"><span class="badge" id="s-badge">Clean read</span><p class="sentence" id="s-sent"></p><p class="never">A clean read is not a safe bet. Meme coins can go to zero.</p><div class="chips" id="s-flags"></div></div>`;
+  const run = () => {
+    const D = decide({ mintActive: S.mint, freezeActive: S.freeze, liq: S.liq, top10: S.top10, age: S.age, vol: S.vol, noSoc: !S.soc, h1: S.move }, 'This token');
+    const b = $('#s-badge'); b.textContent = D.verdict; b.className = 'badge ' + (D.verdict === 'Clean read' ? 'clean' : D.verdict === 'Risky' ? 'risky' : 'avoid');
+    $('#s-sent').textContent = D.sentence;
+    $('#s-flags').innerHTML = [...D.avoid.map(t => ['#ff5470', t]), ...D.soft.map(t => ['#ffb829', t])].map(([c, t]) => `<a style="pointer-events:none"><i style="background:${c}"></i>${esc(cap(t))}</a>`).join('') || '<a style="pointer-events:none"><i style="background:#2fd5b5"></i>No flags</a>';
+  };
+  const bind = (id, fn, out) => $('#' + id).addEventListener('input', e => { fn(+e.target.value); $('#' + id + '-v').textContent = out(+e.target.value); run(); });
+  bind('s-liq', v => { S.liq = log(v, 2.7, 6); }, v => fmtUsd(log(v, 2.7, 6)));
+  bind('s-top', v => { S.top10 = v; }, v => v + '%');
+  bind('s-age', v => { S.age = v; }, v => v + ' h');
+  bind('s-vol', v => { S.vol = log(v, 2, 6.5); }, v => fmtUsd(log(v, 2, 6.5)));
+  bind('s-move', v => { S.move = v; }, v => '±' + v + '%');
+  for (const [id, k] of [['s-mint', 'mint'], ['s-freeze', 'freeze'], ['s-soc', 'soc']]) {
+    $('#' + id).addEventListener('click', e => { S[k] = !S[k]; e.currentTarget.setAttribute('aria-checked', String(S[k])); Snd.bubble(S[k] ? 600 : 420); run(); });
+  }
+  run();
+}
+
+/* =====================================================================
+   INTRO: "The Descent" (removable block). 5 seconds, one continuous dolly.
+   Exposes window.introDone (promise) and window.DALI_replay().
+   ===================================================================== */
+let _introResolve;
+window.introDone = new Promise(r => { _introResolve = r; });
+const INTRO_MS = 5000;
+const INTRO_ARMS = ARMS.map(a => ({ name: a.name.toUpperCase(), c: a.c }));
+let introActive = false, introSkip = null;
+
+function playIntro() {
+  return new Promise(resolve => {
+    const root = $('#intro'), cv = $('#intro-cv'), ctx = cv.getContext('2d');
+    const hud = $('#intro-hud'), head = $('#intro-head');
+    const html = document.documentElement;
+    introActive = true; html.classList.add('intro-on', 'intro-playing');
+    root.hidden = false; root.classList.remove('out');
+    try { sessionStorage.setItem('dali.intro', '1'); } catch { /* ignore */ }
+    window.DALI_scene?.holdCloseup();
+
+    let W = 0, H = 0, dpr = Math.min(devicePixelRatio || 1, 2);
+    const fit = () => { W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; };
+    fit(); addEventListener('resize', fit);
+
+    // bubbles live in world space; camera dollies toward the eye at z = 0
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const bubbles = Array.from({ length: COARSE ? 46 : 90 }, () => ({ x: rnd(-9, 9), y: rnd(-7, 7), z: rnd(0.5, 40), r: rnd(.05, .22), v: rnd(.4, 1.6), ph: rnd(0, 6.28) }));
+    const Z0 = 44, Z1 = 1.25;
+    const ease = (a, b, t) => { t = Math.min(1, Math.max(0, (t - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const slots = ARMS.map((_, i) => i + 1);                         // arms occupy slots 1..6 of 8, slots 0 and 7 sleep
+    const slotAngle = s => Math.PI * (0.12 + 0.76 * (s / 7));        // lower arc, left to right
+
+    let acc = 0, prev = performance.now(), raf = 0, ended = false, lastArm = -1;
+    const finish = (fast) => {
+      if (ended) return; ended = true; cancelAnimationFrame(raf);
+      removeEventListener('resize', fit); removeEventListener('keydown', onKey, true);
+      root.removeEventListener('click', onClick);
+      html.classList.remove('intro-on'); html.classList.add('intro-playing');
+      window.DALI_scene?.enter(fast ? 700 : 1500);
+      root.style.transitionDuration = fast ? '.3s' : '.5s';
+      root.classList.add('out');
+      setTimeout(() => {
+        root.hidden = true; html.classList.remove('intro-playing'); introActive = false;
+        _introResolve(); resolve();
+      }, fast ? 320 : 520);
+    };
+    introSkip = () => finish(true);
+    const onKey = e => { if (['Escape', 'Enter', ' '].includes(e.key)) { e.preventDefault(); e.stopPropagation(); finish(true); } };
+    const onClick = () => finish(true);
+    addEventListener('keydown', onKey, true); root.addEventListener('click', onClick);
+
+    const f = () => Math.min(W, H) * 1.3 * (W < H ? 1.1 : 1);
+
+    function frame(now) {
+      if (ended) return;
+      acc += Math.min(100, Math.max(0, now - prev)); prev = now;   // clamp so a stalled frame can't skip the intro
+      const ms = Math.min(typeof window.__introMs === 'number' ? window.__introMs : acc, INTRO_MS), p = ms / INTRO_MS, s = ms / 1000;
+      const g = Math.pow(p, 1.55);                                      // slow start, accelerating finish
+      const Zc = Z0 * Math.pow(Z1 / Z0, g);                             // camera distance to the eye
+      const F = f(), cx = W / 2, cy = H / 2 - (W < H ? H * 0.06 : 0);
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+      // faint violet glow that grows as the eye approaches
+      const glow = ease(0.2, 1, p);
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * .6);
+      rg.addColorStop(0, `rgba(128,82,255,${.05 + .22 * glow})`); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
+
+      // rising bubbles (perspective)
+      ctx.lineWidth = 1;
+      for (const b of bubbles) {
+        const yy = ((b.y + s * b.v + 100) % 14) - 7;
+        const sc = F / (Zc * 0.35 + b.z * 0.65 + 1.5);
+        const x = cx + (b.x + Math.sin(s * .8 + b.ph) * .25) * sc, y = cy - yy * sc, r = Math.max(.6, b.r * sc);
+        if (x < -80 || x > W + 80 || y < -80 || y > H + 80) continue;
+        const a = (.1 + .35 * Math.min(1, b.z / 14 + .2)) * (1 - ease(.78, .96, p));
+        ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.stroke();
+        ctx.fillStyle = `rgba(255,255,255,${a * .5})`; ctx.beginPath(); ctx.arc(x - r * .3, y - r * .3, Math.max(.4, r * .18), 0, 6.283); ctx.fill();
+      }
+
+      // the eye
+      const R = F * 1.0 / Zc * 1.0;                                     // sclera half-width in px
+      const open = ease(1.5, 2.0, s);                                   // 1.5 to 2.0s the eye opens
+      const flick = s < 1.5 ? .35 + .25 * Math.sin(s * 5) : 1;
+      const lid = Math.max(.02, open) * R * .62;                        // half-height of the opening
+      ctx.save(); ctx.translate(cx, cy);
+      // lid slit / sclera
+      ctx.beginPath(); ctx.moveTo(-R, 0); ctx.quadraticCurveTo(0, -lid * 2, R, 0); ctx.quadraticCurveTo(0, lid * 2, -R, 0); ctx.closePath();
+      if (open > .02) {
+        ctx.fillStyle = '#0b0714'; ctx.fill();
+        ctx.save(); ctx.clip();
+        const ir = R * .5 * (0.7 + .3 * open);
+        const gi = ctx.createRadialGradient(0, 0, ir * .25, 0, 0, ir);
+        gi.addColorStop(0, '#000'); gi.addColorStop(.38, '#000'); gi.addColorStop(.42, '#8052ff'); gi.addColorStop(.8, '#c9a6ff'); gi.addColorStop(1, '#ffb829');
+        ctx.fillStyle = gi; ctx.beginPath(); ctx.arc(0, 0, ir, 0, 6.283); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(-ir * .32, -ir * .34, ir * .13, 0, 6.283); ctx.fill();
+        ctx.restore();
+      }
+      ctx.lineWidth = Math.max(1.2, R * .012); ctx.strokeStyle = `rgba(255,255,255,${.5 * flick + .35 * open})`;
+      ctx.shadowColor = '#8052ff'; ctx.shadowBlur = 14 + 30 * open;
+      ctx.stroke(); ctx.shadowBlur = 0;
+
+      // six arm-lights wake, one every ~0.33s from 2.0s; slots 0 and 7 stay dark
+      const ringR = R * 2.5;
+      let current = -1;
+      for (let slot = 0; slot < 8; slot++) {
+        const ang = slotAngle(slot);
+        const x = Math.cos(Math.PI - ang) * ringR * 1.15, y = Math.sin(ang) * ringR * .95;
+        const ai = slot - 1, awake = ai >= 0 && ai < 6, tOn = 2 + ai * (2 / 6);
+        const a = awake ? ease(tOn, tOn + .22, s) : 0;
+        const nr = Math.max(2.5, R * (awake ? .075 : .05));
+        if (awake && s >= tOn) current = ai;
+        ctx.lineWidth = Math.max(1, R * .008);
+        if (a > 0) {
+          const col = INTRO_ARMS[ai].c;
+          ctx.strokeStyle = col; ctx.globalAlpha = a * .6;
+          ctx.beginPath(); ctx.moveTo(x * .46, y * .46); ctx.lineTo(x, y); ctx.stroke();
+          ctx.globalAlpha = a; ctx.shadowColor = col; ctx.shadowBlur = 24 * a + 8;
+          ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, nr * (1 + .6 * Math.max(0, 1 - (s - tOn) * 4)), 0, 6.283); ctx.fill();
+          ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        } else if (open > .5) {
+          ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.globalAlpha = open;
+          ctx.beginPath(); ctx.arc(x, y, nr, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1;
+        }
+      }
+      ctx.restore();
+
+      // HUD caption
+      if (current !== lastArm) {
+        lastArm = current;
+        if (current >= 0) { hud.style.color = INTRO_ARMS[current].c; hud.textContent = `ARM ${String(current + 1).padStart(2, '0')} / 06: THE ${INTRO_ARMS[current].name}`; }
+        else hud.textContent = '';
+      }
+      if (s > 4.0) hud.style.opacity = String(Math.max(0, 1 - (s - 4) * 3));
+      // headline + dissolve
+      head.style.opacity = String(ease(3.85, 4.35, s) * (1 - ease(4.55, 4.95, s)));
+      if (s > 4.45) root.style.opacity = String(1 - ease(4.45, 5.0, s));
+
+      if (ms >= INTRO_MS) { root.style.opacity = ''; finish(false); return; }
+      raf = requestAnimationFrame(frame);
+    }
+    $('#intro-skip').onclick = e => { e.stopPropagation(); finish(true); };
+    hud.style.opacity = '1'; head.style.opacity = '0'; root.style.opacity = '';
+    raf = requestAnimationFrame(frame);
+  });
+}
+window.DALI_replay = async () => {
+  if (introActive) return;
+  try { sessionStorage.removeItem('dali.intro'); } catch { /* ignore */ }
+  window.introDone = new Promise(r => { _introResolve = r; });
+  document.body.classList.add('pre-enter');
+  await playIntro();
+  heroEnter();
+};
+function heroEnter() { requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove('pre-enter'))); }
+/* ===================== /INTRO ===================== */
+
+/* =====================================================================
+   SCENE: glass octopus, token droplets, cursor-following drifting triangles, melting clock.
+   three.js is imported dynamically so a CDN failure falls back to the static page.
+   ===================================================================== */
+const sceneStub = {
+  entered: null, hold: false,
+  setActive() {}, holdCloseup() { this.hold = true; }, enter(ms) { this.entered = ms; }, zoomTo(_c, cb) { cb(); }
+};
+window.DALI_scene = sceneStub;
+
+async function initScene() {
+  const canvas = $('#scene');
+  let T;
+  try { T = await import('three'); } catch { document.body.classList.add('nogl'); return; }
+  let renderer;
+  try {
+    renderer = new T.WebGLRenderer({ canvas, antialias: !COARSE, powerPreference: 'high-performance' });
+    if (!renderer.getContext()) throw new Error('no gl');
+  } catch { document.body.classList.add('nogl'); return; }
+  renderer.setClearColor(0x000000, 1);
+  renderer.toneMapping = T.NoToneMapping;
+  const DPR = Math.min(devicePixelRatio || 1, COARSE ? 1.5 : 2);
+  renderer.setPixelRatio(DPR);
+
+  const scene = new T.Scene();
+  const camera = new T.PerspectiveCamera(38, 1, .05, 200);
+  const V = (x = 0, y = 0, z = 0) => new T.Vector3(x, y, z);
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const inOut = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const MOTION = REDUCED ? .25 : 1;
+
+  /* ---------- lights ---------- */
+  scene.add(new T.AmbientLight(0x4a3f80, .35));
+  const key = new T.DirectionalLight(0xb9a2ff, 1.3); key.position.set(3, 5, 6); scene.add(key);
+  const rim = new T.DirectionalLight(0xffb829, 1.5); rim.position.set(-5, 2, -4); scene.add(rim);
+  const under = new T.PointLight(0x2fd5b5, 6, 14, 2); under.position.set(0, -3, 3); scene.add(under);
+
+  /* ---------- octopus ---------- */
+  const oct = new T.Group(); scene.add(oct);
+  function glassMat(rimHex, opacity) {
+    const m = new T.MeshPhysicalMaterial({ color: 0x120c22, roughness: .2, metalness: 0, clearcoat: 1, clearcoatRoughness: .06, transparent: opacity < 1, opacity, emissive: new T.Color(rimHex), emissiveIntensity: 0 });
+    m.userData.rim = { value: new T.Color(rimHex) }; m.userData.k = { value: 1 };
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uRim = m.userData.rim; sh.uniforms.uK = m.userData.k;
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uRim; uniform float uK;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n float fr = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.3);\n totalEmissiveRadiance += uRim * fr * uK;');
+    };
+    return m;
+  }
+  const headMat = glassMat(0x8052ff, .72);
+  const head = new T.Mesh(new T.SphereGeometry(1, 48, 32), headMat); head.scale.set(1, 1.2, .96); head.position.y = .55; oct.add(head);
+  const core = new T.Mesh(new T.SphereGeometry(.5, 24, 16), new T.MeshBasicMaterial({ color: 0x8052ff, transparent: true, opacity: .28, blending: T.AdditiveBlending, depthWrite: false }));
+  core.position.set(0, .6, -.05); oct.add(core);
+
+  // six brains inside the head, one per awake arm
+  const orbs = ARMS.map((a, i) => {
+    const m = new T.Mesh(new T.SphereGeometry(.11, 16, 12), new T.MeshBasicMaterial({ color: new T.Color(a.c), transparent: true, opacity: .3 }));
+    const ang = (i - 2.5) * .42; m.position.set(Math.sin(ang) * .58, .72 + (i % 2) * -.22, .22 + Math.cos(ang) * .1); oct.add(m); return m;
+  });
+
+  const halo = new T.Sprite(new T.SpriteMaterial({ map: (() => { const k = document.createElement('canvas'); k.width = k.height = 128; const g = k.getContext('2d'); const r = g.createRadialGradient(64, 64, 0, 64, 64, 64); r.addColorStop(0, 'rgba(128,82,255,.42)'); r.addColorStop(.5, 'rgba(128,82,255,.12)'); r.addColorStop(1, 'rgba(128,82,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 128, 128); return new T.CanvasTexture(k); })(), blending: T.AdditiveBlending, depthWrite: false, transparent: true }));
+  halo.scale.setScalar(7); halo.position.set(0, -.2, -1.2); oct.add(halo);
+
+  const eyeMat = new T.MeshStandardMaterial({ color: 0xf2ece0, roughness: .25 });
+  const irisMat = new T.MeshStandardMaterial({ color: 0xffb829, emissive: 0xff9a00, emissiveIntensity: .45, roughness: .3 });
+  const pupilMat = new T.MeshBasicMaterial({ color: 0x000000 });
+  const eyes = [-1, 1].map(sx => {
+    const g = new T.Group(); g.position.set(sx * .46, .45, .94);
+    g.add(new T.Mesh(new T.SphereGeometry(.21, 24, 16), eyeMat));
+    const iris = new T.Mesh(new T.SphereGeometry(.125, 20, 14), irisMat); iris.position.z = .115; g.add(iris);
+    const pu = new T.Mesh(new T.SphereGeometry(.07, 14, 10), pupilMat); pu.position.z = .19; g.add(pu);
+    oct.add(g); return g;
+  });
+
+  /* arms: 8 chains of overlapping glass beads. Slots 0 and 7 are the sleeping arms. */
+  const N = COARSE ? 24 : 40, segGeo = new T.SphereGeometry(1, 14, 10);
+  const arms = [];
+  for (let i = 0; i < 8; i++) {
+    const asleep = i === 0 || i === 7, ai = i - 1;
+    const phi = (-1 + 2 * i / 7) * 1.7;
+    const col = asleep ? 0x777777 : new T.Color(ARMS[ai].c);
+    const mat = glassMat(col, 1);
+    const meshes = Array.from({ length: N }, () => { const m = new T.Mesh(segGeo, mat); oct.add(m); return m; });
+    arms.push({ i, asleep, ai, phi, mat, meshes, len: asleep ? 1.35 : 2.7 + (i % 2) * .15, curl: asleep ? 6.2 : 2.1 + (i % 3) * .35, p0: asleep ? -1.0 : -.95, ph: rnd(0, 6.28), sp: rnd(.5, .9), glow: 0, reach: 0, target: null, wave: 0, tip: V() });
+  }
+  const awakeArms = arms.filter(a => !a.asleep);
+  const tmpA = V(), tmpB = V(), tmpD = V(), tmpP = V();
+  function updateArm(a, t, dt) {
+    const sw = MOTION;
+    a.reach += ((a.target ? 1 : 0) - a.reach) * Math.min(1, dt * 4.5);
+    a.wave = Math.max(0, a.wave - dt * .75);
+    a.glow = Math.max(0, a.glow - dt * .55);
+    tmpP.set(Math.sin(a.phi) * .58, -.5, Math.cos(a.phi) * .46);
+    for (let k = 0; k < N; k++) {
+      const s = k / (N - 1);
+      let pitch = a.p0 + a.curl * Math.pow(s, a.asleep ? 1.1 : 1.7) + Math.sin(t * a.sp + s * 3.2 + a.ph) * .2 * s * sw;
+      pitch += a.wave * (1.1 * s + Math.sin(t * 10 - s * 6) * .5 * s);
+      const az = a.phi + Math.sin(t * .5 + a.ph + s * 2.4) * .28 * s * sw;
+      tmpD.set(Math.sin(az) * Math.cos(pitch), Math.sin(pitch), Math.cos(az) * Math.cos(pitch));
+      if (a.reach > .001 && a.target) {
+        const w = a.reach * smooth(.04, .5, s);
+        tmpA.copy(a.target).sub(tmpP).normalize();
+        tmpD.multiplyScalar(1 - w).addScaledVector(tmpA, w).normalize();
+      }
+      const seg = a.len / N;
+      tmpP.addScaledVector(tmpD, seg);
+      const r = (.2 * Math.pow(1 - s, .9) + .036) * (a.asleep ? .8 : 1);
+      a.meshes[k].position.copy(tmpP); a.meshes[k].scale.setScalar(r);
+    }
+    a.tip.copy(tmpP);
+    const base = a.asleep ? 0 : .05 + .03 * Math.sin(t * 1.4 + a.ph);
+    a.mat.emissiveIntensity = base + a.glow * .9;
+    a.mat.userData.k.value = a.asleep ? .25 : .6 + a.glow * 2.2;
+  }
+
+  /* ---------- token droplets ---------- */
+  const haloTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,184,41,.9)'); r.addColorStop(.4, 'rgba(255,184,41,.25)'); r.addColorStop(1, 'rgba(255,184,41,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); return new T.CanvasTexture(c); })();
+  const coinGeo = new T.SphereGeometry(.15, 16, 12), coinMat = new T.MeshBasicMaterial({ color: 0xffb829 });
+  const coins = [];
+  let hh = 3.2, hw = 5, S = 1;
+  function spawnCoin(x, counts) {
+    if (coins.length >= 5) return;
+    const g = new T.Group(); const m = new T.Mesh(coinGeo, coinMat); m.scale.set(.85, 1.3, .85); g.add(m);
+    const sp = new T.Sprite(new T.SpriteMaterial({ map: haloTex, blending: T.AdditiveBlending, depthWrite: false, transparent: true })); sp.scale.setScalar(.9); g.add(sp);
+    g.position.set(x, hh + .6, rnd(-.3, .5)); scene.add(g);
+    coins.push({ g, state: 'fall', vy: rnd(.9, 1.3), seed: rnd(0, 6), t: 0, arm: null, counts });
+  }
+  function dropAtScreen(clientX) {
+    const ndc = V((clientX / innerWidth) * 2 - 1, 0, .5).unproject(camera);
+    const dir = ndc.sub(camera.position).normalize(); const k = (0 - camera.position.z) / dir.z;
+    spawnCoin(camera.position.x + dir.x * k, true); Snd.drop();
+  }
+  const headW = V(), mouthW = V(), tipW = V();
+  function updateCoins(dt, t) {
+    oct.getWorldPosition(headW); head.getWorldPosition(headW);
+    for (let i = coins.length - 1; i >= 0; i--) {
+      const c = coins[i], g = c.g; c.t += dt;
+      if (c.state === 'fall') {
+        g.position.y -= c.vy * dt * MOTION; g.position.x += Math.sin(t * 2 + c.seed) * .12 * dt;
+        if (g.position.y < headW.y + 2.6 * S && g.position.y > headW.y - 1.2 * S && Math.abs(g.position.x - headW.x) < 3.2 * S) {
+          let best = null, bd = 1e9;
+          for (const a of awakeArms) if (!a.target) { a.meshes[0].getWorldPosition(tmpB); const d = tmpB.distanceTo(g.position); if (d < bd) { bd = d; best = a; } }
+          if (best) { c.state = 'reach'; c.arm = best; c.t = 0; c.vy *= .3; }
+        }
+        if (g.position.y < -hh - 1) { scene.remove(g); coins.splice(i, 1); }
+      } else if (c.state === 'reach') {
+        c.arm.target = oct.worldToLocal(tmpA.copy(g.position));
+        oct.localToWorld(tipW.copy(c.arm.tip));
+        g.position.y -= c.vy * dt * .6; g.position.lerp(tipW, Math.min(1, dt * 1.1));
+        if (tipW.distanceTo(g.position) < .3 * S || c.t > 2.4) { c.state = 'snatch'; c.t = 0; }
+      } else if (c.state === 'snatch') {
+        oct.localToWorld(tipW.copy(c.arm.tip));
+        mouthW.set(0, -.2, .3); oct.localToWorld(mouthW);
+        const k = clamp(c.t / .55, 0, 1);
+        g.position.copy(tipW).lerp(mouthW, inOut(k)); g.scale.setScalar(1 - k * .9);
+        c.arm.target = oct.worldToLocal(tmpA.copy(mouthW));
+        if (k >= 1) {
+          c.arm.target = null; c.arm.glow = 1; pulse = 1; Snd.snatch();
+          if (c.counts) { store.coins++; save(); updateCounter(); }
+          scene.remove(g); coins.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  /* ---------- drifting triangles ---------- */
+  const PN = COARSE ? 520 : 1500, pos = new Float32Array(PN * 3), col = new Float32Array(PN * 3), siz = new Float32Array(PN), seed = new Float32Array(PN);
+  const palette = ['#8052ff', '#ffb829', '#2fd5b5', '#ff4f8b', '#4d8dff', '#c9a6ff'].map(h => new T.Color(h));
+  for (let i = 0; i < PN; i++) {
+    pos.set([rnd(-15, 15), rnd(-8, 8), rnd(-9, 3)], i * 3);
+    const c = palette[i % palette.length]; col.set([c.r, c.g, c.b], i * 3);
+    siz[i] = rnd(.05, .17); seed[i] = Math.random();
+  }
+  const pg = new T.BufferGeometry();
+  pg.setAttribute('position', new T.BufferAttribute(pos, 3)); pg.setAttribute('aColor', new T.BufferAttribute(col, 3));
+  pg.setAttribute('aSize', new T.BufferAttribute(siz, 1)); pg.setAttribute('aSeed', new T.BufferAttribute(seed, 1));
+  const pmat = new T.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uScale: { value: 600 }, uMouse: { value: new T.Vector3(0, 0, 0) }, uAspect: { value: 1 }, uDim: { value: 1 } },
+    vertexShader: `attribute float aSize; attribute float aSeed; attribute vec3 aColor; uniform float uTime; uniform float uScale; uniform vec3 uMouse; uniform float uAspect; uniform float uDim;
+      varying vec3 vC; varying float vA; varying float vS;
+      void main(){ vec3 p = position;
+        p.y = mod(p.y + uTime*(0.06+0.22*fract(aSeed*7.3)) + 8.0, 16.0) - 8.0; p.x += sin(uTime*.25 + aSeed*20.0)*.35;
+        vec4 mv = modelViewMatrix*vec4(p,1.0); vec4 cp = projectionMatrix*mv;
+        vec2 ndc = cp.xy/cp.w; vec2 dl = uMouse.xy - ndc; vec2 da = vec2(dl.x*uAspect, dl.y); float d = length(da);
+        bool follower = aSeed < .42;
+        float near = smoothstep(1.1, .0, d) * uMouse.z;
+        // followers drift toward the cursor and swirl around it; the rest are nudged away
+        if (follower) { ndc += dl * near * (.55 + .35*aSeed) + vec2(-dl.y, dl.x) * near * .35 * (aSeed - .2); }
+        else { ndc -= normalize(da + 1e-4) * vec2(1.0/uAspect, 1.0) * smoothstep(.22, .0, d) * uMouse.z * .08; }
+        gl_Position = vec4(ndc*cp.w, cp.z, cp.w);
+        gl_PointSize = aSize*uScale/(-mv.z) * (1.0 + (follower ? near*.9 : 0.0));
+        vC = aColor; vS = aSeed; vA = smoothstep(8.0,5.5,abs(p.y)) * uDim * (1.0 + (follower ? near*.9 : 0.0)); }`,
+    fragmentShader: `varying vec3 vC; varying float vA; varying float vS; uniform float uTime;
+      float sdTri(vec2 p, float r){ const float k = 1.7320508; p.x = abs(p.x) - r; p.y = p.y + r/k;
+        if (p.x + k*p.y > 0.0) p = vec2(p.x - k*p.y, -k*p.x - p.y)/2.0; p.x -= clamp(p.x, -2.0*r, 0.0); return -length(p)*sign(p.y); }
+      void main(){ vec2 uv = gl_PointCoord*2.0-1.0; float a = vS*6.2831 + uTime*(.15+vS*.4); float c=cos(a), s=sin(a); uv = mat2(c,-s,s,c)*uv;
+        float d = sdTri(uv, .55); float o = 1.0 - smoothstep(0.0, .16, abs(d)); if (o < .02) discard;
+        gl_FragColor = vec4(vC, clamp(o*vA*.75, 0.0, 1.0));
+        #include <colorspace_fragment>
+      }`
+  });
+  const points = new T.Points(pg, pmat); points.frustumCulled = false; scene.add(points);
+
+  /* ---------- melting clock, hanging in the dark ---------- */
+  const clockTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+    g.fillStyle = 'rgba(255,255,255,.05)'; g.beginPath(); g.arc(256, 230, 190, 0, 6.283); g.fill();
+    g.strokeStyle = '#fff'; g.lineWidth = 9; g.stroke();
+    g.lineCap = 'round';
+    for (let i = 0; i < 12; i++) { const a = i / 12 * 6.283; g.lineWidth = i % 3 ? 5 : 9; g.beginPath(); g.moveTo(256 + Math.sin(a) * 158, 230 - Math.cos(a) * 158); g.lineTo(256 + Math.sin(a) * 178, 230 - Math.cos(a) * 178); g.stroke(); }
+    g.lineWidth = 12; g.strokeStyle = '#fff'; g.beginPath(); g.moveTo(256, 230); g.lineTo(256 + Math.sin(-.9) * 90, 230 - Math.cos(-.9) * 90); g.stroke();
+    g.lineWidth = 8; g.strokeStyle = '#ffb829'; g.beginPath(); g.moveTo(256, 230); g.lineTo(256 + Math.sin(1.9) * 135, 230 - Math.cos(1.9) * 135); g.stroke();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(256, 230, 11, 0, 6.283); g.fill();
+    const t = new T.CanvasTexture(c); t.colorSpace = T.SRGBColorSpace; return t;
+  })();
+  const CG = 26, cgeo = new T.PlaneGeometry(1.5, 1.5, CG, CG), cbase = cgeo.attributes.position.array.slice();
+  const clock = new T.Group();
+  const cmesh = new T.Mesh(cgeo, new T.MeshBasicMaterial({ map: clockTex, transparent: true, depthWrite: false, side: T.DoubleSide, opacity: .9 }));
+  clock.add(cmesh);
+  const thread = new T.Line(new T.BufferGeometry().setFromPoints([V(0, .75, 0), V(0, 3.2, 0)]), new T.LineBasicMaterial({ color: 0x555555, transparent: true, opacity: .6 }));
+  clock.add(thread); clock.position.z = -2.5; scene.add(clock);
+  function meltClock(t) {
+    const p = cgeo.attributes.position.array, wob = .85 + .15 * Math.sin(t * .8) * MOTION;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = cbase[i], y = cbase[i + 1], u = y / .75;
+      const m = smooth(-.15, 1, -u);
+      const dx = (x - .16) / .2, drip = .55 * Math.exp(-dx * dx) * m * m * wob;
+      p[i] = x * (1 - .38 * m) + .04 * m * Math.sin(t * .6) * MOTION;
+      p[i + 1] = y - m * m * .5 - drip;
+    }
+    cgeo.attributes.position.needsUpdate = true;
+  }
+
+  /* ---------- layout ---------- */
+  let narrow = false;
+  const wp = V();
+  const screenToWorld = (nx, ny, z) => { wp.set(nx, ny, .5).unproject(camera); const d = wp.sub(camera.position).normalize(); return camera.position.clone().addScaledVector(d, (z - camera.position.z) / d.z); };
+  const BASE = { pos: V(0, 0, 10), look: V(0, 0, 0) };
+  function layout() {
+    const W = innerWidth, H = innerHeight;
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H; camera.updateProjectionMatrix();
+    camera.position.copy(BASE.pos); camera.lookAt(BASE.look); camera.updateMatrixWorld(true);
+    hh = Math.tan(T.MathUtils.degToRad(camera.fov / 2)) * 10; hw = hh * camera.aspect;
+    narrow = camera.aspect < 1 || W < 900;
+    if (!narrow) {
+      S = Math.min(hh * .74 / 2.2 * 1.5, hw * .34, 1.0);
+      oct.position.set(hw * .46, -hh * .02 + .85 * S, 0);
+      clock.position.x = hw * .02; clock.position.y = hh * .5; clock.scale.setScalar(hh * .26);
+    } else {
+      S = Math.min(hh * .42 / 2.2 * 1.5, hw * .5 / 1.5, .9);
+      oct.position.set(0, hh * .42 + .7 * S, 0);
+      clock.position.x = -hw * .72; clock.position.y = hh * .62; clock.scale.setScalar(hh * .13);
+    }
+    oct.scale.setScalar(S);
+    pmat.uniforms.uScale.value = (H / (2 * Math.tan(T.MathUtils.degToRad(camera.fov / 2)))) * DPR;
+  }
+
+  /* ---------- camera states ---------- */
+  const cam = { mode: 'idle', t0: 0, dur: 1, fromP: V(), fromL: V(), toP: V(), toL: V(), look: V(), after: null };
+  const eyeW = V();
+  function closeupPose(outP, outL) {
+    oct.updateMatrixWorld(true); eyes[1].getWorldPosition(eyeW);
+    outL.copy(eyeW); outP.copy(eyeW).add(V(0, .02, 1.05));
+  }
+  function startTween(mode, toP, toL, dur, after) {
+    cam.mode = mode; cam.t0 = performance.now(); cam.dur = dur; cam.fromP.copy(camera.position); cam.fromL.copy(cam.look);
+    cam.toP.copy(toP); cam.toL.copy(toL); cam.after = after || null;
+  }
+  function holdCloseup() { layout(); const p = V(), l = V(); closeupPose(p, l); camera.position.copy(p); cam.look.copy(l); camera.lookAt(l); cam.mode = 'hold'; }
+  function enter(ms) {
+    if (cam.mode !== 'hold') { holdCloseup(); }
+    startTween('enter', BASE.pos, BASE.look, REDUCED ? 1 : ms || 1500);
+  }
+  /* ---------- interaction ---------- */
+  const ray = new T.Raycaster(), ptr = new T.Vector2();
+  let down = null;
+  const bodyMeshes = [head, ...arms.flatMap(a => a.meshes)];
+  let blink = 0, pulse = 0;
+  function setPtr(e) { const r = canvas.getBoundingClientRect(); ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ptr, camera); }
+  canvas.addEventListener('pointermove', e => {
+    if (!homeMode || e.pointerType !== 'mouse') return;
+    setPtr(e); canvas.style.cursor = ray.intersectObjects(bodyMeshes, false)[0] ? 'pointer' : '';
+  });
+  canvas.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
+  canvas.addEventListener('pointerup', e => {
+    if (!homeMode || !down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 9; down = null;
+    if (moved || cam.mode === 'enter' || cam.mode === 'hold') return;
+    setPtr(e);
+    const hit = ray.intersectObjects(bodyMeshes, false)[0];
+    if (hit) {
+      blink = .45; pulse = 1; Snd.boop();
+      const a = awakeArms[Math.floor(Math.random() * awakeArms.length)]; a.wave = 1.2;
+    } else dropAtScreen(e.clientX);
+  });
+  // cursor for the particle field (listens on window so it works above the pages too)
+  const mouse = { x: 0, y: 0, sx: 0, sy: 0, on: 0, target: 0 };
+  window.addEventListener('pointermove', e => { mouse.x = (e.clientX / innerWidth) * 2 - 1; mouse.y = -((e.clientY / innerHeight) * 2 - 1); mouse.target = 1; if (!mouse.seen) { mouse.sx = mouse.x; mouse.sy = mouse.y; mouse.seen = true; } }, { passive: true });
+  document.addEventListener('pointerleave', () => { mouse.target = 0; });
+  window.addEventListener('blur', () => { mouse.target = 0; });
+  window.addEventListener('dali:arm', e => { const i = e.detail.index; arms[i + 1].glow = 1; pulse = .8; });
+
+  /* ---------- loop ---------- */
+  let homeMode = true, raf = 0, last = performance.now(), tAcc = 0, autoT = 3.5, frameSkip = 0;
+  function frame(now) {
+    raf = requestAnimationFrame(frame);
+    if (COARSE && (frameSkip ^= 1)) return;                         // ~30fps on touch devices
+    const dt = Math.min(.05, (now - last) / 1000); last = now; tAcc += dt * (REDUCED ? .2 : 1);
+    const t = tAcc;
+    oct.position.y += 0;                                             // layout owns base y; bob is applied as an offset below
+    const bob = Math.sin(t * .7) * .1 * MOTION;
+    const baseY = oct.userData.baseY ?? (oct.userData.baseY = oct.position.y);
+    oct.position.y = baseY + bob * S; oct.rotation.y = Math.sin(t * .35) * .12 * MOTION; oct.rotation.z = Math.sin(t * .5) * .03 * MOTION;
+    oct.updateMatrixWorld(true);
+
+    blink = Math.max(0, blink - dt); pulse = Math.max(0, pulse - dt * 1.4);
+    const bl = blink > 0 ? 1 - Math.sin((1 - blink / .45) * Math.PI) * .92 : (Math.sin(t * .9) > .985 ? .15 : 1);
+    eyes.forEach(g => { g.scale.y = bl; });
+    headMat.emissiveIntensity = .08 + pulse * .6 + .05 * Math.sin(t * 1.6);
+    headMat.userData.k.value = 1.1 + pulse * 1.6;
+    core.material.opacity = .22 + .12 * Math.sin(t * 1.3) + pulse * .35; core.scale.setScalar(1 + pulse * .25);
+    orbs.forEach((o, i) => { const a = arms[i + 1].glow; o.material.opacity = .28 + a * .72 + .08 * Math.sin(t * 2 + i); o.scale.setScalar(1 + a * .7); });
+
+    if (homeMode) { for (const a of arms) updateArm(a, t, dt); updateCoins(dt, t); }
+    if (!REDUCED && cam.mode === 'idle' && (autoT -= dt) < 0) { autoT = rnd(5, 8); spawnCoin(oct.position.x + rnd(-2.4, 2.4) * S, false); }
+
+    mouse.sx += (mouse.x - mouse.sx) * Math.min(1, dt * 7); mouse.sy += (mouse.y - mouse.sy) * Math.min(1, dt * 7); mouse.on += (mouse.target - mouse.on) * Math.min(1, dt * 3);
+    pmat.uniforms.uMouse.value.set(mouse.sx, mouse.sy, mouse.on); pmat.uniforms.uAspect.value = camera.aspect;
+    pmat.uniforms.uTime.value = t; if (homeMode) meltClock(t);
+    clock.rotation.z = Math.sin(t * .4) * .04 * MOTION;
+
+    // camera
+    if (cam.mode === 'enter') {
+      const k = clamp((performance.now() - cam.t0) / cam.dur, 0, 1), e = inOut(k);
+      camera.position.lerpVectors(cam.fromP, cam.toP, e); cam.look.lerpVectors(cam.fromL, cam.toL, e);
+      if (k >= 1) { const fn = cam.after; cam.mode = 'idle'; if (fn) fn(); }
+    } else if (cam.mode === 'idle') {
+      camera.position.set(Math.sin(t * .2) * .15 * MOTION, Math.cos(t * .17) * .08 * MOTION, 10); cam.look.set(0, 0, 0);
+    }
+    camera.lookAt(cam.look);
+    renderer.render(scene, camera);
+  }
+  function setActive(home) {                                       // home = octopus room; otherwise only the particle field runs behind the pages
+    homeMode = home; oct.visible = home; clock.visible = home;
+    pmat.uniforms.uDim.value = home ? 1 : .38;
+    if (home && cam.mode !== 'enter' && cam.mode !== 'hold') cam.mode = 'idle';
+    if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; } else if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } });
+  addEventListener('resize', () => { clearTimeout(initScene._rt); initScene._rt = setTimeout(() => { oct.userData.baseY = undefined; layout(); }, 120); });
+
+  /* ---------- go ---------- */
+  try { await Promise.race([document.fonts.ready, sleep(1500)]); } catch { /* ignore */ }
+  layout();
+  camera.position.copy(BASE.pos); cam.look.copy(BASE.look);
+  const wasHold = sceneStub.hold || document.documentElement.classList.contains('intro-playing');
+  if (wasHold) holdCloseup();
+  if (sceneStub.entered != null) enter(sceneStub.entered);
+  const onHome = !curRoute || curRoute.name === 'home';
+  window.DALI_scene = { setActive, holdCloseup, enter, zoomTo() {}, THREE: T, _dbg: { oct, camera, arms, coins, spawnCoin, cam, renderer } };
+  setActive(onHome);
+  document.body.classList.add('gl');
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+function boot() {
+  const html = document.documentElement;
+  document.body.classList.toggle('touch', COARSE);
+  mountFooters(); renderTokenCards(); buildArmCards(); updateCounter(); walletUI(); renderRecent(); syncSizeChips(); initHow();
+  const snd = $('#sound');
+  if (!C.features.sound) snd.hidden = true; else snd.addEventListener('click', () => Snd.toggle());
+  route(location.hash || '#/', true);
+  initScene();
+  quietReconnect(); syncFromApi();
+  if (C.api && C.features.api) setInterval(() => { if (!document.hidden && ['vote', 'p', 'board'].includes(curRoute?.name)) syncFromApi(); }, 5000);   // real counts from the backend
+  if (html.classList.contains('intro-on') && C.features.intro) playIntro().then(heroEnter);
+  else { html.classList.remove('intro-on'); _introResolve(); heroEnter(); }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+</script>
+</body>
+</html>
